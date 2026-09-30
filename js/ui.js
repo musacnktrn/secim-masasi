@@ -2,7 +2,7 @@
 // Rozetler, toast + geri al, çekmece, modal, onay kutusu, Cmd+K hızlı arama ve KİŞİ KARTI (her ekrandan açılır).
 import {
   store, bus, esc, fmt, trBaslik, DURUMLAR, DURUM_AD, SINIFLAR, SINIF_AD, ARAC_DURUM_AD, gecikme, kisiGrubu, ulasim, aracOf,
-  durumYap, sinifYap, notEkle, aracAta, yazabilirMi, aramaEslesir, firmaListesi, firmaAdi, kaynakMetni, olayMetni,
+  durumYap, sinifYap, notEkle, aracAta, yazabilirMi, isaretleyebilirMi, aramaEslesir, firmaListesi, firmaAdi, kaynakMetni, olayMetni,
 } from './core.js';
 
 // ---------------------------------------------------------------- küçük yardımcılar
@@ -73,8 +73,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') { if ($('[da
 
 // ---------------------------------------------------------------- işaretleme (ortak): 2 oylu kişide tüm firmalarını sorar
 export async function isaretle(id, durum, { kendi = null } = {}) {
-  if (!yazabilirMi() && store.ben?.rol !== 'sofor') return toast('İşaretleme yetkin yok', { tur: 'hata' });
   const f = store.firmalar.get(id); if (!f) return;
+  if (!isaretleyebilirMi(f)) return toast('Bu kişiyi işaretleme yetkin yok', { tur: 'hata' });
   let ids = [id];
   const grup = kisiGrubu(f);
   if (grup.length > 1 && ['oy_kullandi', 'fuarda', 'yolda'].includes(durum)) {

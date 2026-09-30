@@ -12,21 +12,26 @@ export const EKRANLAR = {
   dashboard: { dosya: './ekranlar/dashboard.js', ad: 'Dashboard', roller: ['yonetici', 'masa', 'rapor'] },
   yonetim:   { dosya: './ekranlar/yonetim.js',   ad: 'Yönetim',   roller: ['yonetici'] },
   saha:      { dosya: './ekranlar/saha.js',      ad: 'Saha',      roller: ['yonetici', 'masa', 'sofor'], mobil: true },
-  rapor:     { dosya: './ekranlar/rapor.js',     ad: 'Rapor',     roller: ['yonetici', 'masa', 'rapor', 'sofor'], mobil: true },
+  rapor:     { dosya: './ekranlar/rapor.js',     ad: 'Rapor',     roller: ['yonetici', 'masa', 'rapor', 'sofor', 'sorumlu'], mobil: true },
+  sorumlu:   { dosya: './ekranlar/sorumlu.js',   ad: 'Araç sorumlusu', roller: ['yonetici', 'masa', 'sorumlu'], mobil: true },
+  bildirimler: { dosya: './ekranlar/bildirimler.js', ad: 'Bildirimler', roller: ['yonetici', 'masa', 'rapor', 'sofor', 'sorumlu'], mobil: true },
 };
 const MENU = ['masa', 'kisiler', 'harita', 'araclar', 'dashboard', 'yonetim'];
 const dar = () => window.innerWidth < 760;
 function varsayilanYol() {
   const r = store.ben?.rol;
   if (r === 'sofor') return 'saha';
+  if (r === 'sorumlu') return 'sorumlu';
   if (r === 'rapor') return dar() ? 'rapor' : 'dashboard';
   return dar() ? 'saha' : 'masa';
 }
 
 // ---------------------------------------------------------------- tema
-const tema = localStorage.getItem('secim-tema') || 'acik';
-document.documentElement.dataset.tema = tema;
-function temaDegistir() { const t = document.documentElement.dataset.tema === 'koyu' ? 'acik' : 'koyu'; document.documentElement.dataset.tema = t; try { localStorage.setItem('secim-tema', t); } catch {} }
+// tema: tasarımdaki [data-theme="light"|"dark"]; eski [data-tema] da eşlenir (ekran dosyaları hangisini okursa)
+let tema = 'acik'; try { tema = localStorage.getItem('secim-tema') || 'acik'; } catch {}
+function temaUygula(t) { document.documentElement.dataset.tema = t; document.documentElement.dataset.theme = t === 'koyu' ? 'dark' : 'light'; }
+temaUygula(tema);
+function temaDegistir() { const t = document.documentElement.dataset.tema === 'koyu' ? 'acik' : 'koyu'; temaUygula(t); try { localStorage.setItem('secim-tema', t); } catch {} bus.emit('tema', { tema: t }); }
 
 // ---------------------------------------------------------------- kabuk
 let aktif = null, aktifYol = null, yenileBekliyor = false, asistanModul = null;

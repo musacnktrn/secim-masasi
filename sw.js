@@ -5,7 +5,7 @@
 // Yalnız bu sitenin kendi dosyalarına dokunur. Supabase (veri + canlı bağlantı), jsDelivr / unpkg (kütüphaneler),
 // Google Fonts ve harita karoları başka kökendendir; bu çalışan onları hiç görmez, tarayıcı normal yoluyla gider.
 
-const CACHE = 'secim-v1';          // kabuk listesi değişince sürümü artır: eski önbellek kendiliğinden silinir
+const CACHE = 'secim-v2';          // kabuk listesi değişince sürümü artır: eski önbellek kendiliğinden silinir
 const ONEK = 'secim-';             // yalnız bu uygulamanın önbelleklerini temizle
 const ZAMAN_ASIMI = 3500;          // saklı kopya varken ağı en çok bu kadar bekle (ms)
 const ZAYIF_SURE = 30000;          // ağ bir kez yavaş/kopuk bulununca bu süre boyunca saklı kopya beklemeden verilir
@@ -173,3 +173,27 @@ function cevrimdisiSayfa() {
 </body></html>`;
   return new Response(html, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
+
+// ---------------------------------------------------------------- telefon bildirimi (web push)
+// Sunucu (push edge function) {baslik, metin, id, firma_id, tur, url} gönderir. iPhone'da yalnız Ana Ekrana Eklenmiş uygulamada çalışır.
+self.addEventListener('push', olay => {
+  let v = {};
+  try { v = olay.data ? olay.data.json() : {}; } catch { v = { baslik: '72. Komite', metin: olay.data ? olay.data.text() : '' }; }
+  olay.waitUntil(self.registration.showNotification(v.baslik || '72. Komite · Seçim Masası', {
+    body: v.metin || '',
+    icon: 'img/ikon-192.png',
+    badge: 'img/ikon-192.png',
+    tag: v.id ? `b-${v.id}` : undefined,
+    renotify: true,
+    data: { url: v.url || './#bildirimler', id: v.id, firma_id: v.firma_id },
+  }));
+});
+self.addEventListener('notificationclick', olay => {
+  olay.notification.close();
+  const hedef = new URL(olay.notification.data?.url || './#bildirimler', KOK).href;
+  olay.waitUntil((async () => {
+    const pencereler = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const p of pencereler) { if (p.url.startsWith(KOK_URL)) { await p.focus(); try { await p.navigate(hedef); } catch { p.postMessage({ tur: 'git', url: hedef }); } return; } }
+    await self.clients.openWindow(hedef);
+  })());
+});

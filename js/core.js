@@ -28,7 +28,7 @@ export const ARAC_DURUMLARI = [
   { k: 'hazir', ad: 'Hazır' }, { k: 'yolda', ad: 'Yolda' }, { k: 'fuarda', ad: 'Fuarda' }, { k: 'mola', ad: 'Mola' }, { k: 'arizali', ad: 'Arızalı' },
 ];
 export const ARAC_DURUM_AD = Object.fromEntries(ARAC_DURUMLARI.map(s => [s.k, s.ad]));
-export const ROL_AD = { yonetici: 'Yönetici', masa: 'Masa', rapor: 'Rapor', sofor: 'Şoför', bot: 'Bot' };
+export const ROL_AD = { yonetici: 'Yönetici', masa: 'Masa', rapor: 'Rapor', sofor: 'Şoför', sorumlu: 'Araç sorumlusu', bot: 'Bot' };
 export const VARIS = { ad: 'Fuar İzmir, Gaziemir', lat: 38.3472178, lon: 27.1196579 };
 
 // ---------------------------------------------------------------- olay yolu
@@ -50,6 +50,7 @@ export const store = {
   topluluk: [],
   asistan: [],               // asistan_mesajlar, eskiden yeniye
   istekler: [],              // asistan_istekler, en yeni başta
+  bildirimler: [],           // bana gelen bildirimler (yönetici hepsini okuyabilir ama zil yalnız kendininkini sayar), en yeni başta
   cevrimici: navigator.onLine,
   canli: false,
   kuyruk: [],
@@ -57,6 +58,14 @@ export const store = {
 export const benRol = () => store.ben?.rol;
 export const yoneticiMi = () => store.ben?.rol === 'yonetici';
 export const yazabilirMi = () => ['yonetici', 'masa'].includes(store.ben?.rol);
+// şoför kendi aracının yolcularını, araç sorumlusu sorumlu olduğu kişileri ve araçlarının yolcularını işaretleyebilir (sunucu RLS de denetler)
+export function isaretleyebilirMi(f) {
+  const r = store.ben?.rol; if (r === 'yonetici' || r === 'masa') return true; if (!f) return false;
+  const a = f.arac_id ? store.araclar.get(f.arac_id) : null;
+  if (r === 'sofor') return !!a && a.sofor_kullanici === store.ben.id;
+  if (r === 'sorumlu') return f.sorumlu_id === store.ben.id || (!!a && a.sorumlu_id === store.ben.id);
+  return false;
+}
 
 // ---------------------------------------------------------------- yardımcılar
 export const trKucuk = s => String(s ?? '').replace(/I/g, 'ı').replace(/İ/g, 'i').toLocaleLowerCase('tr');
@@ -110,8 +119,8 @@ export function sayac() {
 }
 // saati belli ama gelmemiş: kaç dakika gecikti (0 = gecikme yok)
 export function gecikme(f, dk = simdiDk()) {
-  if (!f.tasima_saati || ['yolda', 'fuarda', 'oy_kullandi'].includes(f.durum)) return 0;
-  const g = dk - dakika(f.tasima_saati); return g > 5 ? Math.round(g) : 0;
+  if (!f.tasima_saati || !['bekliyor', 'arandi'].includes(f.durum)) return 0;   // tasarım kuralı: saat + 10 dk geçti ve Bekliyor/Arandı
+  const g = dk - dakika(f.tasima_saati); return g > 10 ? Math.round(g) : 0;
 }
 export const evrakVar = f => !!f.evrak_uyari;
 export const kisiGrubu = f => f.kisi_anahtar ? firmaListesi().filter(x => x.kisi_anahtar === f.kisi_anahtar) : [f];
@@ -165,7 +174,12 @@ export async function veriYukle() {
   store.ayarlar = Object.fromEntries(ayarlar.map(a => [a.anahtar, a.deger]));
   store.topluluk = topluluk;
   await asistanYukle();
+  await bildirimYukle();
   bus.emit('hazir');
+}
+export async function bildirimYukle() {
+  try { const { data } = await sb.from('bildirimler').select('*').eq('alici_id', store.ben?.id).order('zaman', { ascending: false }).limit(200); store.bildirimler = data || []; }
+  catch (e) { console.warn('bildirimler', e); }
 }
 export async function asistanYukle() {
   const [m, i] = await Promise.all([
@@ -184,7 +198,7 @@ async function tazele() {
     const { data: o } = await sb.from('olaylar').select('*').order('zaman', { ascending: false }).limit(100);
     if (o) { const var_ = new Set(store.olaylar.map(x => x.id)); const yeni = o.filter(x => !var_.has(x.id)); if (yeni.length) { store.olaylar = [...yeni, ...store.olaylar].sort((a, b) => b.id - a.id).slice(0, 800); bus.emit('olay', {}); } }
     const { data: a } = await sb.from('araclar').select('*'); if (a) { store.araclar = new Map(a.map(x => [x.id, x])); bus.emit('araclar'); }
-    await asistanYukle(); bus.emit('asistan'); bus.emit('istek');
+    await asistanYukle(); await bildirimYukle(); bus.emit('asistan'); bus.emit('istek'); bus.emit('bildirim', {});
   } catch (e) { console.warn('tazele', e); }
 }
 
@@ -217,6 +231,12 @@ export function canliBaglan() {
       const i = store.istekler.findIndex(m => m.id === p.new?.id);
       if (i >= 0) store.istekler[i] = p.new; else if (p.new) store.istekler.unshift(p.new);
       bus.emit('istek', { istek: p.new });
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'bildirimler' }, p => {
+      if (!p.new || p.new.alici_id !== store.ben?.id) return;
+      const i = store.bildirimler.findIndex(b => b.id === p.new.id);
+      if (i >= 0) store.bildirimler[i] = p.new; else store.bildirimler.unshift(p.new);
+      bus.emit('bildirim', { bildirim: p.new, yeni: i < 0 });
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'profiller' }, p => {
       if (p.new?.id) store.profiller.set(p.new.id, p.new); bus.emit('profil', {});
@@ -301,6 +321,87 @@ export async function aracAta(ids, aracId, { kaynak = 'el', metin = null } = {})
   await yaz({ tur: 'firma', ids, alanlar: { arac_id: aracId, ...kaynakAlan(kaynak, metin) } });
   return async () => { for (const o of onceki) { iyimser([o.id], { arac_id: o.arac_id ?? null }); await yaz({ tur: 'firma', ids: [o.id], alanlar: { arac_id: o.arac_id ?? null, ...kaynakAlan('el', 'geri alındı') } }); } };
 }
+// ---------------------------------------------------------------- görev dağılımı ve şoför geri sayımı
+export const ekip = () => [...store.profiller.values()].filter(p => p.aktif && p.rol !== 'bot').sort((a, b) => a.ad_soyad.localeCompare(b.ad_soyad, 'tr'));
+export async function sorumluAta(ids, kullaniciId, { kaynak = 'el', metin = null } = {}) {
+  ids = [].concat(ids);
+  const onceki = iyimser(ids, { sorumlu_id: kullaniciId });
+  await yaz({ tur: 'firma', ids, alanlar: { sorumlu_id: kullaniciId, ...kaynakAlan(kaynak, metin) } });
+  return async () => { for (const o of onceki) { iyimser([o.id], { sorumlu_id: o.sorumlu_id ?? null }); await yaz({ tur: 'firma', ids: [o.id], alanlar: { sorumlu_id: o.sorumlu_id ?? null, ...kaynakAlan('el', 'geri alındı') } }); } };
+}
+export async function aracSorumluAta(aracId, kullaniciId) {
+  const a = store.araclar.get(aracId); if (a) { store.araclar.set(aracId, { ...a, sorumlu_id: kullaniciId }); bus.emit('arac', { id: aracId }); }
+  await yaz({ tur: 'arac_guncelle', id: aracId, alanlar: { sorumlu_id: kullaniciId } });
+}
+// Şoför geri sayımı: 10dk → 5dk → kapida → aldim → yolda → birakti. Sunucu sorumlulara bildirim atar, 5 dk sonra hatırlatır.
+export const GERI_SAYIM = [
+  { k: '10dk', ad: '10 DK KALDI' }, { k: '5dk', ad: '5 DK KALDI' }, { k: 'kapida', ad: 'KAPIDAYIM' },
+  { k: 'aldim', ad: 'ALDIM', durum: 'yolda' }, { k: 'yolda', ad: 'YOLA ÇIKTIK', durum: 'yolda' }, { k: 'birakti', ad: 'FUARA BIRAKTIM', durum: 'fuarda' },
+];
+export const geriSayimSonraki = f => { const i = GERI_SAYIM.findIndex(g => g.k === f.geri_sayim); return GERI_SAYIM[i + 1] || null; };
+export async function geriSayimYap(firmaId, adim, { kaynak = 'el', metin = null } = {}) {
+  const g = GERI_SAYIM.find(x => x.k === adim); const f = store.firmalar.get(firmaId); if (!g || !f) return;
+  // durum yalnız ileri gider: oy kullanmışı fuarda'ya, fuardakini yolda'ya düşürmez
+  const SIRA = ['bekliyor', 'arandi', 'yolda', 'fuarda', 'oy_kullandi'];
+  const alanlar = { geri_sayim: adim, ...(g.durum && SIRA.indexOf(g.durum) > SIRA.indexOf(f.durum) ? { durum: g.durum } : {}) };
+  const onceki = iyimser([firmaId], { ...alanlar, geri_sayim_zamani: new Date().toISOString() });
+  await yaz({ tur: 'firma', ids: [firmaId], alanlar: { ...alanlar, ...kaynakAlan(kaynak, metin) } });
+  return async () => { const { id, ...eski } = onceki[0]; iyimser([id], eski); await yaz({ tur: 'firma', ids: [id], alanlar: { ...eski, ...kaynakAlan('el', 'geri alındı') } }); };
+}
+// ---------------------------------------------------------------- bildirimler
+export const okunmamisBildirim = () => store.bildirimler.filter(b => !b.gorulme && !b.cevap).length;
+export const cevapsizBildirimler = () => store.bildirimler.filter(b => !b.cevap && b.secenekler?.length > 1 && Date.now() - new Date(b.zaman) > 10 * 60000);
+const CEVAP_DURUM = { 'Aldık': 'yolda', 'Yolda': 'yolda', 'Fuarda': 'fuarda', 'Fuarda ✓': 'fuarda', 'Oy kullandı': 'oy_kullandi' };
+export async function bildirimCevapla(id, cevap) {
+  const b = store.bildirimler.find(x => x.id === id);
+  const alan = { cevap, gorulme: b?.gorulme || new Date().toISOString() };
+  if (b) { Object.assign(b, alan, { cevap_zamani: new Date().toISOString() }); bus.emit('bildirim', {}); }
+  const { error } = await sb.from('bildirimler').update(alan).eq('id', id); if (error) throw hataCevir(error);
+  if (b?.firma_id) {
+    const d = CEVAP_DURUM[cevap]; const f = store.firmalar.get(b.firma_id);
+    if (d && f && f.durum !== d && !(f.durum === 'oy_kullandi')) await durumYap([b.firma_id], d, { kaynak: 'el', metin: `Bildirim cevabı: ${cevap}` });
+    if (cevap === 'Sorun var') await notEkle(b.firma_id, 'Sorun bildirildi (bildirim cevabı)');
+  }
+}
+export async function bildirimGoruldu(ids) {
+  ids = [].concat(ids).filter(id => { const b = store.bildirimler.find(x => x.id === id); return b && !b.gorulme; });
+  if (!ids.length) return; const z = new Date().toISOString();
+  ids.forEach(id => { const b = store.bildirimler.find(x => x.id === id); if (b) b.gorulme = z; }); bus.emit('bildirim', {});
+  await sb.from('bildirimler').update({ gorulme: z }).in('id', ids);
+}
+// iPhone/Android telefon bildirimi (web push). iPhone'da önce Ana Ekrana Ekle şart.
+export const pushDestekli = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+export const pushIzni = () => (window.Notification ? Notification.permission : 'desteklenmiyor');
+const b64uBayt = s => { const t = s.replace(/-/g, '+').replace(/_/g, '/'); const p = t + '='.repeat((4 - (t.length % 4)) % 4); return Uint8Array.from(atob(p), c => c.charCodeAt(0)); };
+export async function pushAc() {
+  if (!pushDestekli()) throw new Error('Bu tarayıcı bildirimi desteklemiyor. iPhone\'da önce Ana Ekrana Ekle ile uygulamayı kur.');
+  const izin = await Notification.requestPermission(); if (izin !== 'granted') throw new Error('Bildirim izni verilmedi');
+  const kayit = await navigator.serviceWorker.register('sw.js'); await navigator.serviceWorker.ready;
+  const { data, error } = await sb.functions.invoke('push', { body: { islem: 'anahtar' } }); if (error || !data?.anahtar) throw new Error('Bildirim anahtarı alınamadı');
+  let abone = await kayit.pushManager.getSubscription();
+  if (!abone) abone = await kayit.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uBayt(data.anahtar) });
+  const j = abone.toJSON();
+  const { error: e2 } = await sb.from('push_abonelikleri').upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, cihaz: navigator.userAgent.slice(0, 180) }, { onConflict: 'endpoint' });
+  if (e2) throw hataCevir(e2);
+  return true;
+}
+export async function pushTest() { const { data, error } = await sb.functions.invoke('push', { body: { islem: 'test' } }); if (error || data?.hata) throw new Error(data?.hata || 'Test bildirimi gönderilemedi'); return data; }
+// ---------------------------------------------------------------- kalan süre (OSRM, trafiksiz tahmin; 60 sn önbellek)
+const _sure = new Map();
+export async function kalanSure(a, b) {
+  if (!a?.lat || !b?.lat) return null;
+  const anah = [a.lat, a.lon, b.lat, b.lon].map(x => Number(x).toFixed(3)).join(',');
+  const o = _sure.get(anah); if (o && Date.now() - o.t < 60000) return o.v;
+  try {
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`);
+    const j = await r.json(); const x = j.routes?.[0]; if (!x) return null;
+    const v = { dk: Math.max(1, Math.round(x.duration / 60)), km: Math.round(x.distance / 100) / 10 };
+    _sure.set(anah, { t: Date.now(), v }); return v;
+  } catch { return null; }
+}
+export const aracKonum = a => (a?.son_lat ? { lat: a.son_lat, lon: a.son_lon } : null);
+export const firmaKonum = f => (f?.lat ? { lat: f.lat, lon: f.lon } : null);
+
 export async function firmaAlanYaz(id, alanlar, { kaynak = 'el', metin = null } = {}) {
   iyimser([id], alanlar); await yaz({ tur: 'firma', ids: [id], alanlar: { ...alanlar, ...kaynakAlan(kaynak, metin) } });
 }
@@ -363,6 +464,8 @@ export function olayMetni(o) {
   if (o.tur === 'not') return `${kim} · not: ${String(o.yeni || '').split('\n').pop()}`;
   if (o.tur === 'arac') { const y = store.araclar.get(Number(o.yeni)); return `${kim} · araç: ${y ? fmt.plaka(y.plaka) : 'kaldırıldı'}`; }
   if (o.tur === 'arac_durum') return `${kim} · ${ARAC_DURUM_AD[o.yeni] || o.yeni}`;
+  if (o.tur === 'sorumlu') { const p = store.profiller.get(o.yeni); return `${kim} · sorumlu: ${p ? p.ad_soyad : 'kaldırıldı'}`; }
+  if (o.tur === 'geri_sayim') { const g = GERI_SAYIM.find(x => x.k === o.yeni); return `${kim} · şoför: ${g ? g.ad.toLocaleLowerCase('tr') : o.yeni}`; }
   return `${kim} · ${o.tur}`;
 }
 export function kaynakMetni(o) {

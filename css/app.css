@@ -1,31 +1,57 @@
 /* 72. Komite · Seçim Masası · TASARIM SİSTEMİ (ATLAS, 2026-09-30)
    Kırmızı = "bizim liste" rengidir. Uyarılar turuncu/amber, başarı yeşil. Rakamlar tabular. */
+
+/* ---- Claude Design token'ları (tasarim/sm-tokens.css, birebir) ---- */
+:root, :root[data-theme="light"] {
+  --bg:#F4F4F5; --surface:#FFFFFF; --surface-2:#FAFAFA; --surface-3:#F0F0F2; --hover:#F6F6F7;
+  --line:#E6E6E9; --line-2:#D6D6DB; --ink:#1A1A1A; --ink-2:#52525A; --ink-3:#8B8B94;
+  --red:#C8102E; --red-d:#8F0B20; --red-soft:#FCEBEE; --red-line:rgba(200,16,46,.38); --on-red:#FFFFFF;
+  --amber:#D97706; --amber-ink:#9A4F02; --amber-soft:#FEF1DE; --yellow:#CA8A04; --yellow-soft:#FEF7D1; --yellow-ink:#7A5200;
+  --blue:#2563EB; --blue-soft:#E8EFFE; --violet:#7C3AED; --violet-soft:#F1EAFE; --green:#15803D; --green-soft:#E3F5E9;
+  --gray-soft:#ECECEF; --karsi:#3F3F46; --karsi-ink:#FFFFFF;
+  --shadow:0 1px 2px rgba(16,16,20,.04),0 4px 14px rgba(16,16,20,.05); --shadow-lg:0 24px 70px rgba(16,16,20,.22);
+  --map:#EDEDEF; --map-2:#E4E4E7; --water:#DCE2E8; --scrim:rgba(20,20,24,.32); --past:rgba(120,120,130,.07);
+}
+:root[data-theme="dark"] {
+  --bg:#0C0C0E; --surface:#151518; --surface-2:#1A1A1E; --surface-3:#212126; --hover:#1E1E23;
+  --line:#26262C; --line-2:#34343B; --ink:#F3F3F4; --ink-2:#A8A8B1; --ink-3:#6F6F79;
+  --red:#E3213F; --red-d:#A30D24; --red-soft:rgba(227,33,63,.14); --red-line:rgba(227,33,63,.5); --on-red:#FFFFFF;
+  --amber:#F59E0B; --amber-ink:#FBBF5A; --amber-soft:rgba(245,158,11,.14); --yellow:#EAB308; --yellow-soft:rgba(234,179,8,.13); --yellow-ink:#F5D25A;
+  --blue:#5B8DEF; --blue-soft:rgba(91,141,239,.15); --violet:#A78BFA; --violet-soft:rgba(167,139,250,.15); --green:#34C46A; --green-soft:rgba(52,196,106,.14);
+  --gray-soft:#26262C; --karsi:#52525B; --karsi-ink:#F3F3F4;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35); --shadow-lg:0 24px 70px rgba(0,0,0,.6);
+  --map:#141417; --map-2:#1B1B1F; --water:#1A2129; --scrim:rgba(0,0,0,.55); --past:rgba(255,255,255,.025);
+}
+html, body { margin:0; padding:0; }
+body { font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; font-feature-settings:"cv11","ss01"; }
+a { color:var(--red); text-decoration:none; } a:hover { color:var(--red-d); }
+input, select, textarea, button { font-family:inherit; }
+@keyframes smPulse { 0%,100% { box-shadow:0 0 0 0 rgba(217,119,6,.55); } 50% { box-shadow:0 0 0 5px rgba(217,119,6,0); } }
+@keyframes smBlink { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+@keyframes smShimmer { 0% { background-position:-400px 0; } 100% { background-position:400px 0; } }
+@keyframes smIn { from { transform:translateY(8px); opacity:0; } to { transform:none; opacity:1; } }
+@keyframes smShake { 0%,100% { transform:none; } 20%,60% { transform:translateX(-8px); } 40%,80% { transform:translateX(8px); } }
+@keyframes smDrain { from { transform:scaleX(1); } to { transform:scaleX(0); } }
+
+/* ---- Uygulamanın eski değişken adları tasarım token'larına bağlanır (ekran dosyaları iki adı da kullanabilir) ---- */
 :root {
-  --kirmizi: #C8102E; --kirmizi-koyu: #8F0B20; --kirmizi-acik: #FDECEE; --kirmizi-cizgi: #F4B8C1;
-  --zemin: #F6F6F4; --yuzey: #FFFFFF; --yuzey-2: #FAFAF9; --yuzey-3: #F1F1EF;
-  --metin: #1A1A1A; --metin-2: #4A4A4A; --metin-3: #7A7A78; --cizgi: #E6E6E3; --cizgi-2: #D5D5D1;
-  --gri: #8A8A87; --gri-acik: #EEEEEC;
-  --mavi: #2563EB; --mavi-acik: #E8EFFE;
-  --amber: #D97706; --amber-acik: #FEF3E2;
-  --mor: #7C3AED; --mor-acik: #F1EAFE;
-  --yesil: #16A34A; --yesil-acik: #E6F6EC;
-  --turuncu: #EA580C; --turuncu-acik: #FFEDE3;
-  --sari: #CA8A04; --sari-acik: #FEF9C3;
-  --koyu: #2B2B2B;
-  --golge-1: 0 1px 2px rgba(20, 20, 20, .06), 0 1px 1px rgba(20, 20, 20, .04);
-  --golge-2: 0 8px 24px rgba(20, 20, 20, .10), 0 2px 6px rgba(20, 20, 20, .06);
-  --golge-3: 0 24px 60px rgba(20, 20, 20, .22);
-  --r-1: 8px; --r-2: 12px; --r-3: 16px;
+  --kirmizi: var(--red); --kirmizi-koyu: var(--red-d); --kirmizi-acik: var(--red-soft); --kirmizi-cizgi: var(--red-line);
+  --zemin: var(--bg); --yuzey: var(--surface); --yuzey-2: var(--surface-2); --yuzey-3: var(--surface-3);
+  --metin: var(--ink); --metin-2: var(--ink-2); --metin-3: var(--ink-3); --cizgi: var(--line); --cizgi-2: var(--line-2);
+  --gri: var(--ink-3); --gri-acik: var(--gray-soft);
+  --mavi: var(--blue); --mavi-acik: var(--blue-soft);
+  --amber-acik: var(--amber-soft);
+  --mor: var(--violet); --mor-acik: var(--violet-soft);
+  --yesil: var(--green); --yesil-acik: var(--green-soft);
+  --turuncu: var(--amber); --turuncu-acik: var(--amber-soft);
+  --sari: var(--yellow-ink); --sari-acik: var(--yellow-soft);
+  --koyu: var(--karsi);
+  --golge-1: var(--shadow); --golge-2: var(--shadow); --golge-3: var(--shadow-lg);
+  --r-1: 9px; --r-2: 12px; --r-3: 14px;
   --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --ust-h: 60px;
+  --ust-h: 64px;
 }
-:root[data-tema="koyu"] {
-  --zemin: #0E0F11; --yuzey: #16181B; --yuzey-2: #1B1D21; --yuzey-3: #22252A;
-  --metin: #F2F2F0; --metin-2: #C4C4C0; --metin-3: #8C8C88; --cizgi: #2A2D32; --cizgi-2: #363A40;
-  --gri-acik: #24272C; --kirmizi-acik: #3A1119; --kirmizi-cizgi: #6B1E2B;
-  --mavi-acik: #172444; --amber-acik: #3A2A10; --mor-acik: #2A1D45; --yesil-acik: #12301E; --turuncu-acik: #3B1D0E; --sari-acik: #3A330C;
-  --golge-1: 0 1px 2px rgba(0, 0, 0, .5); --golge-2: 0 8px 24px rgba(0, 0, 0, .5); --golge-3: 0 24px 60px rgba(0, 0, 0, .7);
-}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: var(--zemin); color: var(--metin); font-family: var(--font); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
 body { min-height: 100vh; min-height: 100dvh; }
