@@ -157,7 +157,16 @@ function kaydetSatirGuncelle(k) { const s = kok?.querySelector(`[data-kaydet-sat
 
 // ================================================================ 1) KULLANICILAR
 const yeni = { ad: '', rol: 'masa', arac: '', sonuc: null, mesgul: false, hata: '' };
-const pinler = new Map();   // bu oturumda üretilen PIN'ler (sunucu PIN'i saklamaz; yalnız üretildiği an bilinir)
+const pinler = new Map();   // PIN kasası (pin_kasasi tablosu, yalnız Admin okur) + bu oturumda üretilenler
+let pinGoster = false, pinYuklendi = false;
+async function pinKasasiYukle() {
+  const { data, error } = await sb.from('pin_kasasi').select('kullanici_id, pin');
+  if (!error) { (data || []).forEach(x => pinler.set(x.kullanici_id, x.pin)); pinYuklendi = true; }
+}
+function pinKaydet(id, pin) {   // yeni/sıfırlanan PIN'i kasaya yaz (yalnız Admin'in RLS izni var)
+  if (!id || !pin) return; pinler.set(id, pin);
+  sb.from('pin_kasasi').upsert({ kullanici_id: id, pin, zaman: new Date().toISOString() }).then(({ error }) => { if (error) console.warn('PIN kasası', error.message); });
+}
 const islemde = new Set();
 
 const rolRozet = rol => `<span class="yon-rol r-${esc(rol)}">${esc(ROL_AD[rol] || rol)}</span>`;
@@ -176,7 +185,7 @@ function kullaniciSatir(p) {
   const alt = bot ? 'Sistem hesabı (bildirim ve ATLAS)'
     : p.rol === 'sofor' ? (aracYaz('sofor_kullanici').length ? `Araç: ${aracYaz('sofor_kullanici').join(', ')}` : 'Araç bağlı değil')
       : p.rol === 'sorumlu' && aracYaz('sorumlu_id').length ? `Araç: ${aracYaz('sorumlu_id').join(', ')}` : p.rol === 'kurul' ? refAlt(p) : '';
-  const pin = pinler.get(p.id);
+  const pin = pinGoster ? pinler.get(p.id) : null;
   const islem = bot ? '<span class="yon-zayif">İşlem yapılamaz</span>' : `
     ${is ? '<span class="yon-donen" title="İşleniyor"></span>' : ''}
     <button class="yon-mini" data-islem="pin" ${is ? 'disabled' : ''}>PIN sıfırla</button>
@@ -185,7 +194,7 @@ function kullaniciSatir(p) {
   return `<div class="yon-satir yon-kul ${bot ? 'bot' : ''} ${p.aktif ? '' : 'pasif'}" data-kid="${esc(p.id)}">
     <div class="yon-kisi"><div class="yon-avatar">${esc(bas(p.ad_soyad))}</div><div style="min-width:0"><div class="yon-ad">${esc(p.ad_soyad)}${ben ? '<span class="yon-sen">sen</span>' : ''}</div>${alt ? `<div class="yon-alt">${esc(alt)}</div>` : ''}</div></div>
     <div>${rolRozet(p.rol)}</div>
-    <div class="yon-pin-kucuk ${pin ? 'acik' : ''}" ${pin ? '' : 'title="PIN saklanmaz; yalnız üretildiği an görünür. Unutulursa PIN sıfırla."'}>${pin ? esc(pin) : '••••'}</div>
+    <div class="yon-pin-kucuk ${pin ? 'acik' : ''}" ${pin ? '' : `title="${pinGoster ? 'Bu kişinin PIN kaydı yok. PIN sıfırla ile yenisini üret.' : 'Görmek için üstteki PIN göster düğmesi'}"`}>${pin ? esc(pin) : '••••'}</div>
     <div>${bot ? '' : anahtarHtml(p.aktif, `data-islem="aktiflik" ${ben || is ? 'disabled' : ''}`, p.aktif ? 'Aktif' : 'Pasif')}</div>
     <div class="yon-son">${esc(sonGirisMetni(p.son_giris))}</div>
     <div class="yon-islem">${islem}</div>
@@ -197,7 +206,7 @@ function tabloCiz() {
   const insan = liste.filter(p => p.rol !== 'bot');
   const oz = kok.querySelector('[data-k-ozet]'); if (oz) oz.textContent = `${insan.filter(p => p.aktif).length} aktif · ${insan.length} toplam`;
   kap.innerHTML = liste.length
-    ? `<div class="yon-kaydir"><div class="yon-tablo-ic"><div class="yon-satir yon-kul yon-baslik-satir"><div>AD SOYAD</div><div>ROL</div><div>PIN</div><div>AKTİF</div><div>SON GİRİŞ</div><div></div></div>${liste.map(kullaniciSatir).join('')}</div></div>`
+    ? `<div class="yon-kaydir"><div class="yon-tablo-ic"><div class="yon-satir yon-kul yon-baslik-satir"><div>AD SOYAD</div><div>ROL</div><div><button type="button" class="yon-mini" data-pin-goster style="padding:2px 8px">${pinGoster ? 'PIN gizle' : 'PIN göster'}</button></div><div>AKTİF</div><div>SON GİRİŞ</div><div></div></div>${liste.map(kullaniciSatir).join('')}</div></div>`
     : '<div class="bos">Henüz kullanıcı yok. Sağdaki formdan ilk üyeyi oluştur.</div>';
 }
 function yeniCiz() {
@@ -248,7 +257,7 @@ async function uyeOlustur() {
     const r = await yonetim('olustur', govde);
     if (!r?.pin) throw new Error('PIN alınamadı, listeden "PIN sıfırla" ile yeniden üret');
     yeni.sonuc = { id: r.id, ad_soyad: r.ad_soyad || ad, rol: r.rol || yeni.rol, pin: r.pin };
-    if (r.id) pinler.set(r.id, r.pin);
+    if (r.id) pinKaydet(r.id, r.pin);
     yeni.ad = ''; yeni.arac = '';
     toast(`${yeni.sonuc.ad_soyad} eklendi · ${ROL_AD[yeni.sonuc.rol]}`, { tur: 'basari' });
     profilleriYenile().catch(e => console.warn('profiller', e));
@@ -259,7 +268,7 @@ async function sonUyeYeniPin() {
   const r = yeni.sonuc; if (!r?.id || yeni.mesgul) return;
   if (!(await onayla(`${r.ad_soyad} için yeni PIN üretilsin mi? Eski PIN hemen geçersiz olur.`, { evet: 'Yeni PIN üret' }))) return;
   yeni.mesgul = true; yeniCiz();
-  try { const s = await yonetim('pin_sifirla', { id: r.id }); r.pin = s.pin; pinler.set(r.id, s.pin); }
+  try { const s = await yonetim('pin_sifirla', { id: r.id }); r.pin = s.pin; pinKaydet(r.id, s.pin); }
   catch (e) { hataGoster(e); }
   finally { yeni.mesgul = false; yeniCiz(); tabloCiz(); }
 }
@@ -299,7 +308,7 @@ async function kullaniciIslem(islem, id, deger) {
       if (!(await onayla(`${ad} için yeni PIN üretilsin mi? Eski PIN hemen geçersiz olur.`, { evet: 'Yeni PIN üret' }))) return;
       islemde.add(id); basladi = true; tabloCiz();
       const r = await yonetim('pin_sifirla', { id });
-      pinler.set(id, r.pin); pinModal(p, r.pin);
+      pinKaydet(id, r.pin); pinModal(p, r.pin);
     } else if (islem === 'aktiflik') {
       const aktif = !p.aktif;
       if (!aktif && !(await onayla(`${ad} pasifleştirilsin mi? Bir daha giriş yapamaz; istediğinde yeniden aktifleştirebilirsin.`, { evet: 'Pasifleştir', tehlike: true }))) return;
@@ -323,7 +332,12 @@ async function kullaniciIslem(islem, id, deger) {
 }
 const kullanicilar = {
   kur(b) {
-    b.addEventListener('click', e => {
+    b.addEventListener('click', async e => {
+      if (e.target.closest('[data-pin-goster]')) {
+        pinGoster = !pinGoster;
+        if (pinGoster && !pinYuklendi) await pinKasasiYukle();
+        tabloCiz(); return;
+      }
       const t = e.target.closest('[data-islem],[data-yeni-olustur],[data-yeni-kopyala],[data-yeni-rol],[data-yeni-yenipin]'); if (!t || t.disabled) return;
       if (t.dataset.islem) kullaniciIslem(t.dataset.islem, t.closest('[data-kid]')?.dataset.kid);
       else if ('yeniOlustur' in t.dataset) uyeOlustur();
