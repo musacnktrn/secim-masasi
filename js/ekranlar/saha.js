@@ -7,7 +7,7 @@ import {
   store, esc, fmt, trBaslik, trKucuk, trArama, dakika, gecikme, firmaListesi, firmaAdi, aramaEslesir, cikis, ROL_AD, VARIS,
   ARAC_DURUMLARI, ARAC_DURUM_AD, DURUM_AD, SINIF_AD, GERI_SAYIM, geriSayimSonraki, geriSayimYap, okunmamisBildirim, kalanSure,
   aracKonum, firmaKonum, ulasim, sayac, aracDurumYap, konumGonder, notEkle, durumYap, kisiGrubu,
-  karsiladim, referansBenMi, isaretleyebilirMi, oyBekliyor,
+  karsiladim, referansBenMi, isaretleyebilirMi, oyBekliyor, oyOnaylayabilirMi, oyOnayla, oyReddet,
 } from '../core.js';
 import { toast, hataGoster, onayla, isaretle, kisiKartiAc, modal, modalKapat } from '../ui.js';
 import asistan from '../asistan.js';
@@ -28,11 +28,15 @@ const ADIMLAR = [
 ];
 // Yönetim kurulu (referans) şoför değildir: yolcu taşıma adımlarını görmez, yalnız aradığını ve oy kullandığını işaretler; karşılama ayrı düğmede
 const KURUL_ADIM = new Set(['arandi', 'oy']);
+// Masa / Admin (2026-10-01, yalnız masa kullanıyor): şoför adımı "Aldım" yok; durumlar masa diliyle: Arandı · Yolda · Fuarda · Oy kullandı
+const MASA_ADIM = { arandi: 'Arandı', yoldayim: 'Yolda', birak: 'Fuarda', oy: 'Oy kullandı' };
+const masaRolu = () => ['masa', 'yonetici'].includes(store.ben?.rol);
 const FILTRELER = [
   { k: 'bizde', ad: 'Bizde', fn: f => f.oy_sinifi === 'bizde' },
   { k: 'gelmedi', ad: 'Gelmedi', fn: f => !['fuarda', 'oy_kullandi'].includes(f.durum) },
   { k: 'geciken', ad: 'Geciken', fn: (f, gec) => (gec.get(f.id) || 0) > 0 },
   { k: 'oy', ad: 'Oy kullandı', fn: f => f.durum === 'oy_kullandi' },
+  { k: 'onay', ad: 'Oy onayı', fn: f => oyBekliyor(f), yalniz: () => oyOnaylayabilirMi() },
 ];
 const FILTRE = Object.fromEntries(FILTRELER.map(f => [f.k, f]));
 const HITAP = new Set(['bey', 'hanim', 'hn', 'bay', 'bayan', 'abi', 'abla']);
@@ -277,13 +281,45 @@ function kartHtml(f, { sofor = false, kucuk = false } = {}) {
     ${f.alma_notu ? `<div class="saha-alma"><span>ALMA NOTU · </span>${esc(f.alma_notu)}</div>` : ''}
     ${f.evrak_uyari ? `<div class="saha-evrak">▲ EVRAK UYARISI · ${esc(f.evrak_uyari)}</div>` : ''}
     ${karsilamaHtml(f, sofor)}
+    ${oyOnayHtml(f)}
     ${kucuk ? '' : `<div class="saha-ikili">
       ${tel ? `<a class="saha-a koyu" href="${esc(tel)}">📞 Ara</a>` : '<span class="saha-a pasif">Telefon yok</span>'}
       ${yol ? `<a class="saha-a cizgi" href="${esc(yol)}" target="_blank" rel="noopener">📍 Yol tarifi</a>` : '<span class="saha-a pasif">Adres yok</span>'}
     </div>`}
-    <div class="saha-adimlar${store.ben?.rol === 'kurul' ? ' kurul' : ''}">${ADIMLAR.map((s, i) => (store.ben?.rol === 'kurul' && !KURUL_ADIM.has(s.k)) ? '' : `<button class="saha-adim r-${s.gun}${i < a ? ' gecti' : ''}${i === a ? ' simdi' : ''}" data-eylem="${s.k}" data-id="${f.id}" aria-pressed="${i === a}">${esc(s.ad)}</button>`).join('')}</div>
+    ${adimlarHtml(f, a)}
     ${flash && flash.id === f.id ? `<div class="saha-flash"><i></i>${esc(flash.metin)}</div>` : ''}
   </article>`;
+}
+
+function adimlarHtml(f, a) {
+  const rol = store.ben?.rol, masa = masaRolu();
+  if (masa && a === 2) a = 1;   // masada "Aldım" yok: araçtaki kişi "Yolda" görünür
+  const dugmeler = ADIMLAR.map((s, i) => {
+    if (rol === 'kurul' && !KURUL_ADIM.has(s.k)) return '';
+    if (masa && !MASA_ADIM[s.k]) return '';
+    return `<button class="saha-adim r-${s.gun}${i < a ? ' gecti' : ''}${i === a ? ' simdi' : ''}" data-eylem="${s.k}" data-id="${f.id}" aria-pressed="${i === a}">${esc(masa ? MASA_ADIM[s.k] : s.ad)}</button>`;
+  }).join('');
+  return `<div class="saha-adimlar${rol === 'kurul' ? ' kurul' : masa ? ' masa' : ''}">${dugmeler}</div>`;
+}
+// Oy bildirimi masada onay bekliyor: masa / Admin kartın üstünde Onayla / Reddet der (kişi kartındaki kutunun aynısı)
+function oyOnayHtml(f) {
+  if (!oyBekliyor(f) || !oyOnaylayabilirMi()) return '';
+  const mes = mesgul.has(`oy${f.id}`) ? ' disabled' : '';
+  return `<div class="saha-oyonay" role="group" aria-label="Oy onayı">
+    <div class="saha-oyonay-yazi"><b>${esc(trBaslik(f.oy_bildiren || '?'))} "oy kullandı" dedi</b><span>${f.oy_bildirim_zamani ? esc(fmt.saat(f.oy_bildirim_zamani)) + ' · ' : ''}onaylarsan oy kullandı sayılır</span></div>
+    <div class="saha-oyonay-dugme"><button class="saha-oyonay-red" data-oy-red="${f.id}"${mes}>Reddet</button><button class="saha-oyonay-ok" data-oy-onay="${f.id}"${mes}>Onayla</button></div>
+  </div>`;
+}
+async function oyKarar(id, onay) {
+  const anahtar = `oy${id}`; if (mesgul.has(anahtar)) return;
+  const f = store.firmalar.get(id); if (!f || !oyBekliyor(f)) return;
+  const ad = firmaAdi(f);
+  if (!onay && !await onayla(`${ad} için "${trBaslik(f.oy_bildiren)}" oy kullandı dedi. Bildirim reddedilsin mi?`, { evet: 'Reddet', tehlike: true })) return;
+  mesgul.add(anahtar); ciz();
+  try {
+    const g = onay ? await oyOnayla(id) : await oyReddet(id);
+    toast(`${ad} · ${onay ? 'oy onaylandı' : 'oy bildirimi reddedildi'}`, { nokta: onay ? 'oy_kullandi' : null, geriAl: g });
+  } catch (e) { hataGoster(e); } finally { mesgul.delete(anahtar); ciz(); }
 }
 
 // ================================================================ ŞOFÖR
@@ -505,17 +541,23 @@ function masaCiz() {
       <button role="tab" data-mod="benim" class="${mod === 'benim' ? 'aktif' : ''}" aria-selected="${mod === 'benim'}">Benim listem</button>
       <button role="tab" data-mod="hepsi" class="${mod === 'hepsi' ? 'aktif' : ''}" aria-selected="${mod === 'hepsi'}">Hepsi · ${fmt.sayi(store.firmalar.size)}</button>
     </div>`);
-  yerlestir('[data-bilgi]', not ? `<div class="saha-bilgi">${IKON.bilgi}<span>${esc(not)}</span></div>` : '');
+  // masa: onay bekleyen oy bildirimi varsa listenin üstünde tek dokunuşla süzülen şerit
+  const bekleyenOy = oyOnaylayabilirMi() && !tercih.filtre.includes('onay') ? firmaListesi().filter(oyBekliyor).length : 0;
+  yerlestir('[data-bilgi]', (bekleyenOy ? `<button class="saha-onay-serit" data-cip="onay">🗳️ <b>${fmt.sayi(bekleyenOy)} oy bildirimi</b> masa onayı bekliyor<span>Göster ›</span></button>` : '')
+    + (not ? `<div class="saha-bilgi">${IKON.bilgi}<span>${esc(not)}</span></div>` : ''));
   const taban = mod === 'benim' ? benim : firmaListesi();
   const aranan = arama ? taban.filter(f => aramaEslesir(f, arama)) : taban;
   const gec = new Map(aranan.map(f => [f.id, gecikme(f)]));
-  yerlestir('[data-cipler]', FILTRELER.map(fl => {
+  const filtreler = FILTRELER.filter(fl => !fl.yalniz || fl.yalniz());
+  yerlestir('[data-cipler]', filtreler.map(fl => {
     const n = aranan.filter(f => fl.fn(f, gec)).length; const ak = tercih.filtre.includes(fl.k);
-    return `<button class="saha-cip${ak ? ' aktif' : ''}${fl.k === 'geciken' && n ? ' uyari' : ''}" data-cip="${fl.k}" aria-pressed="${ak}">${esc(fl.ad)} <span class="say">${fmt.sayi(n)}</span></button>`;
+    return `<button class="saha-cip${ak ? ' aktif' : ''}${(fl.k === 'geciken' || fl.k === 'onay') && n ? ' uyari' : ''}" data-cip="${fl.k}" aria-pressed="${ak}">${esc(fl.ad)} <span class="say">${fmt.sayi(n)}</span></button>`;
   }).join(''));
-  const sonuc = aranan.filter(f => tercih.filtre.every(k => FILTRE[k].fn(f, gec)));
+  const sonuc = aranan.filter(f => tercih.filtre.every(k => !FILTRE[k].yalniz || FILTRE[k].yalniz() ? FILTRE[k].fn(f, gec) : true));
+  const onayOnce = oyOnaylayabilirMi();
   const adlar = new Map(sonuc.map(f => [f.id, firmaAdi(f)]));
-  sonuc.sort((x, y) => (x.durum === 'oy_kullandi') - (y.durum === 'oy_kullandi')
+  sonuc.sort((x, y) => (onayOnce ? oyBekliyor(y) - oyBekliyor(x) : 0)   // masa: onay bekleyen oylar en üstte
+    || (x.durum === 'oy_kullandi') - (y.durum === 'oy_kullandi')
     || (gec.get(y.id) || 0) - (gec.get(x.id) || 0)
     || (x.oy_sinifi !== 'bizde') - (y.oy_sinifi !== 'bizde')
     || (dakika(x.tasima_saati) ?? 9999) - (dakika(y.tasima_saati) ?? 9999)
@@ -542,7 +584,8 @@ async function yolcuEylem(id, k) {
   const f = store.firmalar.get(id); if (!f) return;
   const sofor = soforMu();
   const adim = ADIMLAR.find(x => x.k === k); if (!adim) return;
-  if (ADIMLAR.indexOf(adim) === asama(f)) return mini(`Zaten "${adim.ad}"`);
+  if (ADIMLAR.indexOf(adim) === asama(f)) return mini(`Zaten "${masaRolu() ? MASA_ADIM[k] || adim.ad : adim.ad}"`);
+  if (masaRolu() && adim.durum === f.durum) return mini(`Zaten "${MASA_ADIM[k] || adim.ad}"`);
   // durum değişikliği uyarısı ve oy bildirimi (masa onayı) ortak isaretle() içinde
   mesgul.add(id);
   let ek = '';
@@ -756,10 +799,12 @@ function konumCiz() {
 
 // ================================================================ olay yakalama
 function tikla(e) {
-  const h = e.target.closest('[data-eylem],[data-karsila],[data-cd],[data-wa-ac],[data-arac-durum-ac],[data-konum-anahtar],[data-kisi],[data-mod],[data-cip],[data-daha],[data-atlas-ac],[data-hesap],[data-toplu-birak],[data-arac-sec],[data-filtre-temizle],[data-q-sil],[data-yukari]');
+  const h = e.target.closest('[data-oy-onay],[data-oy-red],[data-eylem],[data-karsila],[data-cd],[data-wa-ac],[data-arac-durum-ac],[data-konum-anahtar],[data-kisi],[data-mod],[data-cip],[data-daha],[data-atlas-ac],[data-hesap],[data-toplu-birak],[data-arac-sec],[data-filtre-temizle],[data-q-sil],[data-yukari]');
   if (!h || !kok?.contains(h)) return;
   const d = h.dataset;
   if (d.eylem) return yolcuEylem(Number(d.id), d.eylem);
+  if (d.oyOnay) return oyKarar(Number(d.oyOnay), true);
+  if (d.oyRed) return oyKarar(Number(d.oyRed), false);
   if (d.karsila) return karsilaBas(Number(d.karsila), h);
   if (d.cd) return cdBas(Number(d.id), d.cd);
   if ('waAc' in d) { waAcik = !waAcik; return ciz(); }
@@ -973,7 +1018,18 @@ body.saha-acik .atlas-dugme{display:none!important}
 .saha-adimlar{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
 .saha-adim{grid-column:span 2;height:52px;border-radius:11px;font-size:14px;font-weight:800;line-height:1.1;padding:0 2px;cursor:pointer;touch-action:manipulation;border:1.5px solid var(--line-2);background:var(--surface);color:var(--ink);transition:transform .06s}
 .saha-adim:nth-child(n+4){grid-column:span 3}
-.saha-adimlar.kurul .saha-adim{grid-column:span 3}
+.saha-adimlar.kurul .saha-adim,.saha-adimlar.masa .saha-adim{grid-column:span 3}
+.saha-onay-serit{display:flex;align-items:center;gap:6px;width:100%;min-height:48px;padding:10px 14px;border-radius:12px;border:1.5px solid var(--amber);background:var(--amber-soft);color:var(--amber-ink);font-size:14px;font-weight:600;text-align:left;cursor:pointer;touch-action:manipulation}
+.saha-onay-serit b{font-weight:800}
+.saha-onay-serit span{margin-left:auto;font-weight:800;white-space:nowrap}
+.saha-oyonay{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:11px;border:1.5px solid var(--amber);background:var(--amber-soft)}
+.saha-oyonay-yazi{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;line-height:1.3}
+.saha-oyonay-yazi b{font-size:14px;font-weight:800;color:var(--amber-ink)}
+.saha-oyonay-yazi span{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.saha-oyonay-dugme{flex:none;display:flex;gap:6px}
+.saha-oyonay-dugme button{height:44px;padding:0 12px;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;touch-action:manipulation;border:1.5px solid var(--line-2);background:var(--surface);color:var(--ink)}
+.saha-oyonay-dugme .saha-oyonay-ok{background:var(--green);border-color:var(--green);color:#fff}
+.saha-oyonay-dugme button:disabled{opacity:.5;cursor:default}
 .saha-b.g-oy-bekliyor{background:var(--amber-soft);color:var(--amber-ink);border-color:var(--amber)}
 .saha-adim:active{transform:scale(.97)}
 .saha-adim.r-arandi{--c:var(--blue);--s:var(--blue-soft);--k:var(--blue)}

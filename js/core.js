@@ -139,15 +139,25 @@ export const ilceler = () => [...new Set(firmaListesi().map(f => f.ilce).filter(
 
 // ---------------------------------------------------------------- giriş
 // Giriş: PIN kimliği belirler (Musa kararı 2026-09-30); ad isteğe bağlı, yalnız aynı PIN'i iki kişi kullanıyorsa gerekir.
+// PIN'in sahibini bul (giriş YAPMAZ): {eposta, ad, rol, kaynak:'pin'|'ad'}. Ekran "bu sen misin?" onayı için kullanır.
+export async function pinSahibi(pin, ad = null) {
+  const { data, error } = await sb.rpc('giris_pin', { p_pin: pin, p_ad: ad || null });
+  if (error) throw new Error('Bağlantı hatası, tekrar dene');
+  if (data?.hata === 'yavas') throw new Error('Çok fazla hatalı deneme. Adını da yazıp tekrar dene ya da birkaç dakika bekle');
+  if (data?.hata === 'coklu') throw new Error('Bu PIN birden fazla kişide. Adını da yazıp tekrar dene');
+  if (!data?.eposta) throw new Error('PIN hatalı');
+  return data;
+}
+// pinSahibi'nden gelen kişiyle oturum aç (parolayı auth doğrular)
+export async function pinleGir(eposta, pin) {
+  const { error } = await sb.auth.signInWithPassword({ email: eposta, password: `pin-${pin}-72k` });
+  if (error) throw new Error('PIN hatalı');
+  await profilYukle();
+  sb.rpc('giris_kaydet').then(() => {});
+  return store.ben;
+}
 export async function girisYap(ad, pin) {
-  const ara = async (pAd) => {
-    const { data, error } = await sb.rpc('giris_pin', { p_pin: pin, p_ad: pAd || null });
-    if (error) throw new Error('Bağlantı hatası, tekrar dene');
-    if (data?.hata === 'yavas') throw new Error('Çok fazla hatalı deneme. 1 dakika bekleyip tekrar dene');
-    if (data?.hata === 'coklu') throw new Error('Bu PIN birden fazla kişide. Adını da yazıp tekrar dene');
-    if (!data?.eposta) throw new Error('PIN hatalı');
-    return data.eposta;
-  };
+  const ara = async (pAd) => (await pinSahibi(pin, pAd)).eposta;
   const dene = async eposta => !(await sb.auth.signInWithPassword({ email: eposta, password: `pin-${pin}-72k` })).error;
   let tamam = await dene(await ara(ad));
   if (!tamam && ad) tamam = await dene(await ara(null));   // ad başka birine denk geldiyse yalnız PIN'le bir kez daha dene

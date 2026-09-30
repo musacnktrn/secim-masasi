@@ -1681,7 +1681,7 @@ textarea.yon-girdi { height: auto; padding: 12px; line-height: 1.5; resize: none
 @media (max-width: 1240px) { .yon-wa-duzen, .yon-veri-duzen { grid-template-columns: 1fr; } .yon-wa-sag { position: static; } }
 @media (max-width: 1100px) { .yon-iki-kart { grid-template-columns: 1fr; } }
 @media (max-width: 900px) {
-  .yon-duzen { grid-template-columns: 1fr; }
+  .yon-duzen { grid-template-columns: minmax(0, 1fr); }   /* 1fr = minmax(auto,1fr): geniş tablo telefonda sayfayı 877 px'e yayıyordu */
   .yon-nav { position: static; }
   .yon-menu { flex-direction: row; overflow-x: auto; scrollbar-width: none; }
   .yon-iki-alan, .yon-istek-iki { grid-template-columns: 1fr; }

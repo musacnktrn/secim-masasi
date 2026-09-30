@@ -18,7 +18,12 @@ export const EKRANLAR = {
   bildirimler: { dosya: './ekranlar/bildirimler.js', ad: 'Bildirimler', roller: ['yonetici', 'kurul', 'masa', 'rapor', 'sofor', 'sorumlu'], mobil: true },
 };
 const MENU = ['masa', 'kisiler', 'harita', 'araclar', 'dashboard', 'yonetim'];
-const dar = () => window.innerWidth < 760;
+const dar = () => matchMedia('(max-width: 759px)').matches;   // innerWidth taşan içerikle büyüyebiliyor; medya sorgusu cihaz genişliğine bakar
+// Telefon gezinmesi (2026-10-01): dar ekranda (≤900 px) ve ana ekrana eklenmiş uygulamada üst menü yerine
+// sol üstte ☰ (yan çekmece) + ana ekran dışında "‹ Geri". Mobil kabuklu ekranlar (saha, rapor, bildirimler) her genişlikte bu çubuğu alır.
+const mqDar = matchMedia('(max-width: 900px)');
+const kurulu = () => { try { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch { return false; } };
+const mobilNav = () => mqDar.matches || kurulu();
 function varsayilanYol() {
   const r = store.ben?.rol;
   if (r === 'sofor') return 'saha';
@@ -51,8 +56,92 @@ let aktif = null, aktifYol = null, yenileBekliyor = false, asistanModul = null;
 const onaySayisi = () => store.istekler.filter(i => i.durum === 'onay_bekliyor').length;
 const onayRozeti = () => { const n = onaySayisi(); return n ? ` <span class="rozet-sayi">${n}</span>` : ''; };
 const ZIL_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>';
+// ---- telefon gezinmesi: üst çubuk + yan çekmece + geri yığını
+const IK = p => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const MB_OGE = [
+  { yol: 'saha', ad: 'Liste', alt: 'Telefonda hızlı işaretleme', ikon: IK('<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>') },
+  { yol: 'sorumlu', ad: 'Araç listem', alt: 'Sorumlu olduğun araçlar', ikon: IK('<rect x="2" y="7" width="15" height="10" rx="2"/><path d="M17 10h3l2 3v4h-5"/><circle cx="7" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/>'), yalniz: ['sorumlu'] },
+  { yol: 'masa', ad: 'Masa', alt: 'Tam masa görünümü ve akış', ikon: IK('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>') },
+  { yol: 'kisiler', ad: 'Kişiler', alt: 'Tüm liste, filtre, arama', ikon: IK('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>') },
+  { yol: 'harita', ad: 'Harita', alt: 'Araçlar ve duraklar', ikon: IK('<path d="M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z"/><path d="M9 3v15M15 6v15"/>') },
+  { yol: 'araclar', ad: 'Araçlar', alt: 'Araç listesi ve durumları', ikon: IK('<rect x="2" y="7" width="15" height="10" rx="2"/><path d="M17 10h3l2 3v4h-5"/><circle cx="7" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/>') },
+  { yol: 'dashboard', ad: 'Dashboard', alt: 'Sayılar ve hedef', ikon: IK('<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>') },
+  { yol: 'rapor', ad: 'Rapor', alt: 'Canlı rapor', ikon: IK('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>') },
+  { yol: 'bildirimler', ad: 'Bildirimler', alt: 'Gelen bildirimler', ikon: IK('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>') },
+  { yol: 'yonetim', ad: 'Admin', alt: 'Kullanıcılar, ayarlar, onaylar', ikon: IK('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>') },
+];
+const mbAd = yol => MB_OGE.find(o => o.yol === yol)?.ad || EKRANLAR[yol]?.ad || '';
+const mbOgeler = () => MB_OGE.filter(o => EKRANLAR[o.yol]?.roller.includes(store.ben?.rol) && (!o.yalniz || o.yalniz.includes(store.ben?.rol)));
+let yigin = [], geriGidiyor = false, aktifAnahtar = '';
+const MENU_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+function mbUstHtml(yol) {
+  const ana = yol === varsayilanYol();
+  return `<header class="mb-ust" data-mb-ust>
+    <button type="button" class="mb-dugme mb-menu" data-mb-menu aria-label="Menüyü aç" aria-expanded="false">${MENU_SVG}</button>
+    ${ana ? '' : '<button type="button" class="mb-geri" data-mb-geri aria-label="Geri">‹ Geri</button>'}
+    <div class="mb-baslik">${esc(mbAd(yol))}</div>
+    <div class="mb-sag">
+      <span class="baglanti mb-baglanti" id="baglanti" role="status"></span>
+      <button type="button" class="mb-dugme" data-ara aria-label="Kişi ara"><span class="mb-ara">⌕</span></button>
+      ${yol === 'bildirimler' ? '' : `<button type="button" class="mb-dugme mb-zil" data-mb-zil aria-label="Bildirimler">${ZIL_SVG}</button>`}
+    </div>
+  </header>`;
+}
+function mbCekmeceHtml() {
+  const bil = okunmamisBildirim(), onay = onaySayisi();
+  const rozet = n => n ? `<b class="mb-c-rozet">${n > 99 ? '99+' : n}</b>` : '';
+  const koyu = document.documentElement.dataset.tema === 'koyu';
+  const rolAd = ROL_AD[store.ben.rol] || store.ben.rol;
+  return `<div class="mb-arka" data-mb-arka></div>
+  <nav class="mb-cekmece" role="dialog" aria-modal="true" aria-label="Menü" tabindex="-1">
+    <div class="mb-c-ust">
+      <div class="mb-c-marka"><span class="mb-c-logo">72. KOMİTE <span class="logo-cubuk">|</span> GENÇ ENERJİ</span><span class="kirmizi-liste">KIRMIZI LİSTE</span></div>
+      <button type="button" class="mb-dugme" data-mb-kapat aria-label="Menüyü kapat">✕</button>
+    </div>
+    <div class="mb-c-kim"><span class="avatar">${esc(bas(store.ben.ad_soyad))}</span><div><div class="mb-c-ad">${esc(store.ben.ad_soyad)}</div><div class="mb-c-rol">${esc(rolAd)}</div></div></div>
+    <div class="mb-c-liste">${mbOgeler().map(o => `<a href="#${o.yol}" class="mb-c-oge${o.yol === aktifYol ? ' aktif' : ''}"${o.yol === aktifYol ? ' aria-current="page"' : ''}>
+      <span class="mb-c-ikon">${o.ikon}</span><span class="mb-c-yazi"><b>${esc(o.ad)}</b><small>${esc(o.alt)}</small></span>${o.yol === 'bildirimler' ? rozet(bil) : o.yol === 'yonetim' ? rozet(onay) : ''}</a>`).join('')}
+    </div>
+    <div class="mb-c-alt">
+      <button type="button" class="mb-c-alt-dugme atlas" data-mb-atlas>ATLAS'a yaz</button>
+      <button type="button" class="mb-c-alt-dugme" data-mb-tema>${koyu ? '☀ Açık tema' : '☾ Koyu tema'}</button>
+      <button type="button" class="mb-c-alt-dugme cikis" data-mb-cikis>Çıkış yap</button>
+    </div>
+  </nav>`;
+}
+function mbCekmeceAc() {
+  panelleriKapat();
+  const kap = el(`<div class="mb-katman">${mbCekmeceHtml()}</div>`);
+  $('#katman').append(kap);
+  $('[data-mb-menu]')?.setAttribute('aria-expanded', 'true');
+  kap.addEventListener('click', e => {
+    if (e.target.closest('[data-mb-arka],[data-mb-kapat]')) return panelleriKapat();
+    const a = e.target.closest('a.mb-c-oge');
+    if (a) { if (a.classList.contains('aktif')) { e.preventDefault(); } panelleriKapat(); return; }
+    if (e.target.closest('[data-mb-atlas]')) { panelleriKapat(); document.querySelector('.atlas-dugme')?.click(); return; }
+    if (e.target.closest('[data-mb-tema]')) { temaDegistir(); panelleriKapat(); return; }
+    if (e.target.closest('[data-mb-cikis]')) { panelleriKapat(); cikis(); }
+  });
+  kap.querySelector('.mb-cekmece')?.focus({ preventScroll: true });   // klavyede Tab menüden başlar; dokunmatikte halka çıkmaz
+}
+function mbGeri() {
+  const onceki = yigin.pop() || varsayilanYol();
+  geriGidiyor = true;
+  if ('#' + onceki === location.hash) { geriGidiyor = false; git(); } else location.hash = '#' + onceki;
+}
+function mbZilCiz() {
+  const z = $('[data-mb-zil]'); if (!z) return;
+  const n = okunmamisBildirim();
+  let r = z.querySelector('.zil-rozet');
+  if (n) { if (!r) { r = document.createElement('span'); r.className = 'zil-rozet'; z.appendChild(r); } r.textContent = n > 99 ? '99+' : String(n); }
+  else if (r) r.remove();
+}
+
 function kabukHtml(yol, mobil) {
-  if (mobil) return `<div class="mobil-kabuk"><div id="ekran"></div></div>`;
+  const mb = mobil || mobilNav();
+  document.body.classList.toggle('mb-acik', mb);
+  if (mobil) return `${mbUstHtml(yol)}<div class="mobil-kabuk"><div id="ekran"></div></div>`;
+  if (mb) return `<div class="kabuk mb-kabuk">${mbUstHtml(yol)}<div id="cevrimdisi"></div><main class="icerik" id="ekran"></main></div>`;
   const menu = MENU.filter(y => EKRANLAR[y].roller.includes(store.ben.rol))
     .map(y => `<a href="#${y}" class="${y === yol ? 'aktif' : ''}">${esc(EKRANLAR[y].ad)}${y === 'yonetim' ? onayRozeti() : ''}</a>`).join('');
   const rolAd = ROL_AD[store.ben.rol] || store.ben.rol;
@@ -127,6 +216,7 @@ setInterval(saatCiz, 1000);
 // ---- zil + bildirim paneli (SM Ustbar zil, kabuktaki masaüstü panel)
 let panelOkunmamis = new Set(), panelImza = '';
 function zilCiz() {
+  mbZilCiz();
   const z = $('[data-zil]'); if (!z) return;
   const n = okunmamisBildirim();
   let r = z.querySelector('.zil-rozet');
@@ -211,13 +301,14 @@ function menuAc() {
   m.style.right = `${Math.max(12, window.innerWidth - a.getBoundingClientRect().right)}px`;
 }
 function panelleriKapat() {
-  document.querySelectorAll('.zil-panel, .zil-arka, .kullanici-menu').forEach(x => x.remove());
+  document.querySelectorAll('.zil-panel, .zil-arka, .kullanici-menu, .mb-katman').forEach(x => x.remove());
+  $('[data-mb-menu]')?.setAttribute('aria-expanded', 'false');
   $('[data-zil]')?.classList.remove('acik');
 }
 // katmanlar sırayla kapanır: modal / palet / çekmece açıksa onlar önce (ui.js), yoksa panel
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape' || $('[data-modal]') || $('.palet') || $('.cekmece')) return;
-  if ($('.zil-panel') || $('.kullanici-menu')) { e.stopPropagation(); panelleriKapat(); }
+  if ($('.zil-panel') || $('.kullanici-menu') || $('.mb-katman')) { e.stopPropagation(); panelleriKapat(); }
 }, true);
 
 // yeni bildirim: zil + panel canlı güncellenir, kısa toast (mobil kabukta da çalışır)
@@ -243,6 +334,11 @@ async function git() {
   let yol = yol0 || varsayilanYol();
   if (!EKRANLAR[yol] || !EKRANLAR[yol].roller.includes(store.ben.rol)) { yol = varsayilanYol(); history.replaceState(null, '', '#' + yol); }
   const tanim = EKRANLAR[yol];
+  // geri yığını: başka ekrana geçerken önceki ekran yığına girer ("‹ Geri" ile dönülür); aynı ekranda parametre değişimi girmez
+  const anahtar = yol + (param ? '/' + param : '');
+  if (geriGidiyor) geriGidiyor = false;
+  else if (aktifAnahtar && aktifAnahtar.split('/')[0] !== yol) { yigin.push(aktifAnahtar); if (yigin.length > 30) yigin.shift(); }
+  aktifAnahtar = anahtar;
   try { aktif?.temizle?.(); } catch {}
   cekmeceKapat();
   const kok = $('#uygulama');
@@ -263,6 +359,14 @@ async function git() {
   asistanYukle();
 }
 function kabukBagla() {
+  const mb = $('[data-mb-ust]');
+  if (mb) {
+    $('[data-mb-menu]', mb)?.addEventListener('click', () => ($('.mb-katman') ? panelleriKapat() : mbCekmeceAc()));
+    $('[data-mb-geri]', mb)?.addEventListener('click', mbGeri);
+    $('[data-ara]', mb)?.addEventListener('click', () => paletAc());
+    $('[data-mb-zil]', mb)?.addEventListener('click', () => { location.hash = '#bildirimler'; });
+    return;
+  }
   const ust = $('.ust'); if (!ust) return;   // mobil kabukta üst çubuk yok (ekranlar kendi başlığını çizer)
   $('[data-ara]', ust)?.addEventListener('click', () => paletAc());
   $('[data-zil]', ust)?.addEventListener('click', () => ($('.zil-panel') ? panelleriKapat() : zilPanelAc()));
@@ -302,6 +406,8 @@ async function acilis() {
   canliBaglan();
 }
 window.addEventListener('hashchange', git);
+// genişlik 900 px sınırını geçince kabuk (üst menü / ☰) yeniden kurulur
+mqDar.addEventListener?.('change', () => { if (store.ben && aktifYol && !EKRANLAR[aktifYol]?.mobil) git(); });
 (async () => {
   try { await profilYukle(); } catch (e) { console.warn(e); }
   if (store.ben) await acilis();

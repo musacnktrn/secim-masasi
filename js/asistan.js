@@ -17,7 +17,13 @@ const ROLE_Q = {
   sorumlu: ['Sıradaki durağım kim?', 'Yolcum nerede, aradınız mı?', 'Fuar girişi nereden?', 'Bir sorun bildir'],
   rapor: ['Son 1 saatte kaç kişi geldi?', 'Hedefe ne kadar kaldı?'],
 };
-ROLE_Q.yonetici = ROLE_Q.masa;
+// Admin: gerçek Claude Code ajanıyla konuşur (Mac'te admin_ajan.py). Taslak örnekler gönderilmez, kutuya yazılır (Admin düzenler).
+const ADMIN_TASLAK = [
+  '35 ABC 123 beyaz Doblo, şoför Ali Veli 0532 000 00 00, 4 kişilik: ekle',
+  'Masaya şu paneli ekle: ',
+];
+ROLE_Q.yonetici = ['Şu an kaç kişi oy kullandı?', 'Kim hâlâ gelmedi?', ...ADMIN_TASLAK, 'Son 1 saatte kimler geldi, saat saat?'];
+const taslakMi = q => ADMIN_TASLAK.includes(q);
 const ANA_ROL = { yonetici: 'yonetici', kurul: 'masa', masa: 'masa', sorumlu: 'sorumlu', sofor: 'sorumlu', rapor: 'rapor' };
 const ROL_ETIKET = {
   masa: 'Masa · soru ve bilgi', yonetici: 'Admin · tam yetki', kurul: 'Yönetim kurulu · soru ve bilgi',
@@ -25,7 +31,7 @@ const ROL_ETIKET = {
 };
 const ROL_IPUCU = {
   masa: 'Masadan soru sorabilir, gelişme bildirebilirsin. İş talepleri Admin\'e onaya gider.',
-  yonetici: 'Tam yetki: soru, gelişme ve komut. Komutlarda önce plan gösterilir.',
+  yonetici: 'Benimle Claude Code\'da konuştuğun gibi konuşabilirsin: veriyi okur ve değiştiririm, araç ve hesap açarım, panele ekran eklerim. Ekleme, silme, toplu değişiklik ve kod değişikliğinden önce planı söyler, "evet" beklerim. Çalışırken "dur" yazarsan dururum.',
   sorumlu: 'Araçların ve yolcuların için hızlı sorular.',
   rapor: 'Salt okunur: sayılar ve ilerleme.',
 };
@@ -95,8 +101,11 @@ function tamlayan(w) {
 const kisaAd = b => { const w = String(b || '').trim().split(/\s+/).filter(Boolean); return w.length > 1 ? `${trBaslik(w[0])} ${trBaslik(w[w.length - 1]).charAt(0)}.` : trBaslik(w[0] || ''); };
 const firmaKisa = f => trBaslik(String(f?.unvan || '').replace(' — ', ' ').split(/\s+/).slice(0, 2).join(' '));
 const zaman = m => fmt.saat(m.zaman);
-// ATLAS'ın düz metni: kaçışlanır, yalnız **kalın** desteklenir
-const metinHtml = t => esc(t || '').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+const sureMetni = sn => { sn = Math.max(0, Math.round(Number(sn) || 0)); const d = Math.floor(sn / 60); return d ? `${d} dk${sn % 60 ? ' ' + (sn % 60) + ' sn' : ''}` : `${sn} sn`; };
+// Admin ajanının çalışan kartı (veri.ajan + veri.calisiyor, durum 'isleniyor') ve "Sıradayım" cevabı
+const ajanCalisiyor = m => m && m.yon === 'atlas' && m.durum === 'isleniyor' && veriOf(m).ajan && veriOf(m).calisiyor;
+// ATLAS'ın düz metni: kaçışlanır, yalnız **kalın** ve `satır içi kod` (Admin ajanı dosya/komut adları) desteklenir
+const metinHtml = t => esc(t || '').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/`([^`\n]+)`/g, '<code class="asistan-kod">$1</code>');
 const onaylayici = () => [...store.profiller.values()].find(p => p.rol === 'yonetici' && p.aktif)?.ad_soyad || 'Admin';
 
 // ---------------------------------------------------------------- konuşma seçimi
@@ -248,7 +257,8 @@ function tikla(e) {
   const g = t.closest('[data-geri]'); if (g) return geriAl(Number(g.dataset.geri));
   const la = t.closest('[data-liste-ac]'); if (la) { const id = Number(la.dataset.listeAc); acikListeler.has(id) ? acikListeler.delete(id) : acikListeler.add(id); return planla(); }
   const c = t.closest('[data-cip]'); if (c) return cip(cipListe[Number(c.dataset.cip)]);
-  const o = t.closest('[data-soru]'); if (o) return gonder(o.dataset.soru);
+  const o = t.closest('[data-soru]'); if (o) return taslakMi(o.dataset.soru) ? kutuyaYaz(o.dataset.soru) : gonder(o.dataset.soru);
+  if (t.closest('[data-ajan-dur]')) return ajanDurdur(t.closest('[data-ajan-dur]'));
   if (t.closest('[data-hepsi]')) { hepsiMod = !hepsiMod; ls.yaz('atlas-tum-konusmalar', hepsiMod); ilkCizim = true; return planla(true); }
   if (t.closest('[data-onay-ac]')) { onayAcik = !onayAcik; return planla(); }
   const git = t.closest('[data-git]'); if (git) return mesajaGit(Number(git.dataset.git));
@@ -268,11 +278,20 @@ function kutuyaYaz(metin) {
 // çip: "Gelişme bildir" yazdırır (kutuya "Gelişme: " gelir), diğerleri doğrudan soru olarak gider
 function cip(c) {
   if (!c) return;
+  if (taslakMi(c)) return kutuyaYaz(c);
   if (/gelişme bildir/i.test(c)) {
     const mevcut = girdi.value.trim();
     return kutuyaYaz(!mevcut ? 'Gelişme: ' : (/^gelişme\s*:/i.test(mevcut) ? girdi.value : 'Gelişme: ' + mevcut));
   }
   gonder(c);
+}
+// Admin ajanı çalışırken "Durdur": sohbete "dur" yazmakla aynı (Mac'teki admin_ajan.py süreci sonlandırır)
+let durGonderildi = 0;
+function ajanDurdur(b) {
+  if (!yoneticiMi() || Date.now() - durGonderildi < 4000) return;
+  durGonderildi = Date.now();
+  if (b) { b.disabled = true; b.textContent = 'Durduruluyor…'; }
+  gonder('dur');
 }
 function yeniPill(goster) { panel?.querySelector('[data-yeni]')?.classList.toggle('gizli', !goster); }
 function mesajaGit(id) {
@@ -546,9 +565,23 @@ function atlasHtml(m, liste, tum) {
   const v = veriOf(m); const tur = TURLER.has(m.tur) ? m.tur : 'cevap';
   const zm = esc(zaman(m));
   const hedef = tum && m.kullanici_id && m.kullanici_id !== store.ben.id ? (profilAd(m.kullanici_id) || m.kullanici_ad || '') : '';
-  const alt = `<div class="asistan-c-alt">ATLAS${hedef ? ' → ' + esc(hedef) : ''} · ${zm}</div>`;
+  const ajanEk = v.ajan && !v.calisiyor && v.sure_sn != null ? ` · ${esc(sureMetni(v.sure_sn))}${v.arac_sayisi ? ` · ${esc(v.arac_sayisi)} adım` : ''}` : '';
+  const alt = `<div class="asistan-c-alt">ATLAS${hedef ? ' → ' + esc(hedef) : ''} · ${zm}${ajanEk}</div>`;
   const sar = ic => `<div class="asistan-m" data-mid="${Number(m.id)}">${ic}</div>`;
 
+  if (v.ajan && v.calisiyor && m.durum === 'isleniyor') {   // Admin ajanı çalışıyor: canlı adım + Durdur
+    const adimlar = diziAl(v.adimlar).filter(a => a && a.a).slice(-4);
+    const gecen = v.baslangic ? sureMetni((Date.now() - new Date(v.baslangic).getTime()) / 1000) : '';
+    const benim = m.kullanici_id === store.ben.id && yoneticiMi();
+    const durBekle = Date.now() - durGonderildi < 4000;
+    return sar(`<div class="asistan-ajan"><div class="asistan-kart-ust"><span class="asistan-ajan-et"><span class="asistan-ajan-don" aria-hidden="true"></span>ÇALIŞIYOR</span>`
+      + `<span class="asistan-kart-zaman">${esc(gecen)}${v.arac_sayisi ? ` · ${esc(v.arac_sayisi)} adım` : ''}</span></div>`
+      + `<div class="asistan-c-metin">${metinHtml(m.metin || 'Üzerinde çalışıyorum…')}</div>`
+      + (v.adim ? `<div class="asistan-ajan-adim">${esc(kisalt(v.adim, 220))}</div>` : '')
+      + (adimlar.length > 1 ? `<div class="asistan-ajan-gecmis">${adimlar.slice(0, -1).map(a => `<div><span>${esc(a.z || '')}</span>${esc(kisalt(a.a, 140))}</div>`).join('')}</div>` : '')
+      + (benim ? `<div class="asistan-kart-alt"><span class="asistan-kaynak">İstersen "dur" yazabilirsin.</span><button type="button" class="asistan-dur" data-ajan-dur ${durBekle ? 'disabled' : ''}>${durBekle ? 'Durduruluyor…' : '■ Durdur'}</button></div>` : '')
+      + '</div>');
+  }
   if (tur === 'islendi') {                       // Bilgi -> ATLAS İŞLEDİ
     const geriAlindi = geriAlindiMi(v);
     const ek = /uygulanmayan|yapmadım/i.test(String(m.metin || '')) ? `<div class="asistan-islendi-not">${metinHtml(m.metin)}</div>` : '';
@@ -607,7 +640,9 @@ function gidenHtml(g) {
     + '<div class="asistan-cevrimdisi">◌ ATLAS şu an çevrimdışı, mesajın sırada. Bağlantı gelince işlenecek.</div>';
 }
 function yaziyorHtml(liste) {
-  const bekleyen = liste.filter(m => m.kullanici_id === store.ben.id && bekliyorMu(m));
+  // Admin ajanı: çalışan kart ya da "Sıradayım" cevabı olan mesaj için "yazıyor / meşgul" notu gösterilmez (ilerleme kartta görünür)
+  const ajanCevapli = new Set(liste.filter(m => m.yon === 'atlas' && (ajanCalisiyor(m) || veriOf(m).sirada)).map(m => numara(m.cevap_id)));
+  const bekleyen = liste.filter(m => m.kullanici_id === store.ben.id && bekliyorMu(m) && !ajanCevapli.has(Number(m.id)));
   if (!bekleyen.length) return '';
   const enYasli = Math.max(...bekleyen.map(m => sessizlik(m, liste)));
   if (enYasli >= BEKLEME_MS) return `<div class="asistan-cevrimdisi">◌ ATLAS şu an meşgul ya da çevrimdışı, ${bekleyen.length > 1 ? 'mesajların' : 'mesajın'} sırada. Cevap gelince burada görünecek; bu pencereyi kapatabilirsin.</div>`;
@@ -705,7 +740,8 @@ function ciz({ alta = false } = {}) {
   // "meşgul" notu için 60 sn sınırında yeniden çiz
   clearTimeout(zamanlayici); zamanlayici = null;
   const bekleyen = liste.filter(m => m.kullanici_id === store.ben.id && bekliyorMu(m));
-  if (bekleyen.length) { const kalan = BEKLEME_MS - Math.max(...bekleyen.map(m => sessizlik(m, liste))); if (kalan > 0) zamanlayici = setTimeout(() => planla(), kalan + 250); }
+  if (liste.some(ajanCalisiyor)) zamanlayici = setTimeout(() => planla(), 5000);   // çalışan kartın geçen süresi
+  else if (bekleyen.length) { const kalan = BEKLEME_MS - Math.max(...bekleyen.map(m => sessizlik(m, liste))); if (kalan > 0) zamanlayici = setTimeout(() => planla(), kalan + 250); }
   gorulduIsaretle(); dugmeCiz();
 }
 let cizimSirada = false, cizimAlta = false;
@@ -908,6 +944,18 @@ function stilEkle() {
 .asistan-hata { align-self: flex-start; width: 92%; box-sizing: border-box; background: var(--amber-soft); border: 1.5px solid var(--amber); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; }
 .asistan-hata-et { font-size: 10.5px; font-weight: 900; letter-spacing: .1em; color: var(--amber-ink); white-space: nowrap; }
 
+/* Admin ajanı çalışıyor (canlı adım + Durdur) */
+.asistan-ajan { align-self: flex-start; width: 92%; box-sizing: border-box; background: var(--surface); border: 1.5px solid var(--blue); border-radius: 12px; padding: 11px 12px; display: flex; flex-direction: column; gap: 8px; }
+.asistan-ajan-et { display: inline-flex; align-items: center; gap: 7px; font-size: 10.5px; font-weight: 900; letter-spacing: .1em; color: var(--blue); white-space: nowrap; }
+.asistan-ajan-don { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--blue-soft); border-top-color: var(--blue); animation: asistan-don .9s linear infinite; }
+.asistan-ajan-adim { font-size: 12.5px; font-weight: 600; color: var(--ink); padding: 6px 9px; border-radius: 8px; background: var(--blue-soft); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.asistan-ajan-gecmis { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+.asistan-ajan-gecmis span { font-variant-numeric: tabular-nums; margin-right: 6px; }
+.asistan-dur { margin-left: auto; flex: none; height: 28px; padding: 0 11px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--surface); color: var(--red); font-size: 12px; font-weight: 800; cursor: pointer; }
+.asistan-dur:hover:not(:disabled) { background: var(--red-soft); }
+.asistan-dur:disabled { opacity: .55; cursor: default; }
+.asistan-kod { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; padding: 1px 5px; border-radius: 5px; background: var(--surface-3); border: 1px solid var(--line); overflow-wrap: anywhere; }
+
 /* bilgi notu, çevrimdışı, yazıyor */
 .asistan-bilgi { align-self: flex-start; max-width: 92%; font-size: 12.5px; color: var(--ink-2); padding: 8px 11px; border-radius: 10px; border: 1px dashed var(--line-2); background: var(--surface); white-space: pre-wrap; overflow-wrap: anywhere; }
 .asistan-cevrimdisi { align-self: flex-start; max-width: 92%; font-size: 12.5px; font-weight: 600; color: var(--amber-ink); padding: 8px 11px; border-radius: 10px; border: 1.5px solid var(--amber); background: var(--amber-soft); flex: none; }
@@ -956,7 +1004,7 @@ function stilEkle() {
 }
 @media (prefers-reduced-motion: reduce) {
   .asistan-panel.acik { animation: none; }
-  .atlas-dugme.asistan-bekliyor::before, .asistan-noktalar i, .atlas-dugme.asistan-nabiz { animation: none; }
+  .atlas-dugme.asistan-bekliyor::before, .asistan-noktalar i, .atlas-dugme.asistan-nabiz, .asistan-ajan-don { animation: none; }
 }
 @media print { .asistan-panel, .asistan-onizleme { display: none !important; } }
 `;
