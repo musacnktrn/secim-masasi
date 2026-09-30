@@ -30,9 +30,9 @@ export default {
       </section>
       <section class="giris-sag">
         <form class="giris-kutu" autocomplete="off" novalidate>
-          <div class="giris-baslik-blok"><h2>Giriş</h2><div class="giris-not">Adını yaz, sana verilen 4 haneli PIN'i gir.</div></div>
+          <div class="giris-baslik-blok"><h2>Giriş</h2><div class="giris-not">Sana verilen 4 haneli PIN'i gir. Adını yazmak zorunlu değil.</div></div>
           <div class="giris-alan">
-            <label class="giris-etiket" for="giris-ad">AD SOYAD</label>
+            <label class="giris-etiket" for="giris-ad">AD SOYAD (isteğe bağlı)</label>
             <input class="giris-ad" id="giris-ad" name="ad" value="" placeholder="Ad soyad" autocapitalize="words" autocomplete="off" spellcheck="false" enterkeyhint="next" aria-label="Ad soyad">
           </div>
           <div class="giris-alan pin">
@@ -72,7 +72,6 @@ export default {
       clearTimeout(zamanlayici);
       if (durum === 'kontrol' || durum === 'tamam') return;
       const ad = form.ad.value.trim();
-      if (ad.length < 3) return hataYaz('Ad soyadını yaz', { ad: true });
       if (pin.length !== 4) return hataYaz('PIN 4 haneli olmalı');
       durum = 'kontrol'; mesaj = ''; form.ad.classList.remove('hata'); ciz();
       try {
@@ -82,7 +81,7 @@ export default {
         await girisSonrasi();
       } catch (e) {
         const pinMi = /PIN hatalı/i.test(e.message);
-        hataYaz(pinMi ? 'PIN hatalı · tekrar dene' : e.message, { pin: pinMi, ad: /bulunamadı/i.test(e.message) });
+        hataYaz(pinMi ? 'PIN hatalı · tekrar dene' : e.message, { pin: pinMi, ad: /Adını da yaz/i.test(e.message) });
       }
     };
     const tus = k => {
@@ -109,6 +108,6 @@ export default {
       else if (e.key === 'Enter' && pin.length === 4) gonder();
     });
     ciz();
-    if (!sonAd) form.ad.focus();
+    // ad isteğe bağlı: klavye açılmasın, doğrudan PIN tuşlarıyla girilsin
   },
 };

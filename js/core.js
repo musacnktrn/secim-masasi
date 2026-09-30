@@ -138,12 +138,20 @@ export const referanslar = () => [...new Set(firmaListesi().map(f => f.referans)
 export const ilceler = () => [...new Set(firmaListesi().map(f => f.ilce).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'tr'));
 
 // ---------------------------------------------------------------- giriş
+// Giriş: PIN kimliği belirler (Musa kararı 2026-09-30); ad isteğe bağlı, yalnız aynı PIN'i iki kişi kullanıyorsa gerekir.
 export async function girisYap(ad, pin) {
-  const { data: eposta, error } = await sb.rpc('giris_eposta', { p_ad: ad });
-  if (error) throw new Error('Bağlantı hatası, tekrar dene');
-  if (!eposta) throw new Error('Bu ad soyadla kullanıcı bulunamadı');
-  const { error: e2 } = await sb.auth.signInWithPassword({ email: eposta, password: `pin-${pin}-72k` });
-  if (e2) throw new Error('PIN hatalı');
+  const ara = async (pAd) => {
+    const { data, error } = await sb.rpc('giris_pin', { p_pin: pin, p_ad: pAd || null });
+    if (error) throw new Error('Bağlantı hatası, tekrar dene');
+    if (data?.hata === 'yavas') throw new Error('Çok fazla hatalı deneme. 1 dakika bekleyip tekrar dene');
+    if (data?.hata === 'coklu') throw new Error('Bu PIN birden fazla kişide. Adını da yazıp tekrar dene');
+    if (!data?.eposta) throw new Error('PIN hatalı');
+    return data.eposta;
+  };
+  const dene = async eposta => !(await sb.auth.signInWithPassword({ email: eposta, password: `pin-${pin}-72k` })).error;
+  let tamam = await dene(await ara(ad));
+  if (!tamam && ad) tamam = await dene(await ara(null));   // ad başka birine denk geldiyse yalnız PIN'le bir kez daha dene
+  if (!tamam) throw new Error('PIN hatalı');
   await profilYukle();
   sb.rpc('giris_kaydet').then(() => {});
   return store.ben;

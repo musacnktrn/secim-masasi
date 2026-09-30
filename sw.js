@@ -5,7 +5,7 @@
 // Yalnız bu sitenin kendi dosyalarına dokunur. Supabase (veri + canlı bağlantı), jsDelivr / unpkg (kütüphaneler),
 // Google Fonts ve harita karoları başka kökendendir; bu çalışan onları hiç görmez, tarayıcı normal yoluyla gider.
 
-const CACHE = 'secim-v4';          // kabuk listesi değişince sürümü artır: eski önbellek kendiliğinden silinir
+const CACHE = 'secim-v5';          // kabuk listesi değişince sürümü artır: eski önbellek kendiliğinden silinir
 const ONEK = 'secim-';             // yalnız bu uygulamanın önbelleklerini temizle
 const ZAMAN_ASIMI = 3500;          // saklı kopya varken ağı en çok bu kadar bekle (ms)
 const ZAYIF_SURE = 30000;          // ağ bir kez yavaş/kopuk bulununca bu süre boyunca saklı kopya beklemeden verilir
