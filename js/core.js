@@ -28,7 +28,8 @@ export const ARAC_DURUMLARI = [
   { k: 'hazir', ad: 'Hazır' }, { k: 'yolda', ad: 'Yolda' }, { k: 'fuarda', ad: 'Fuarda' }, { k: 'mola', ad: 'Mola' }, { k: 'arizali', ad: 'Arızalı' },
 ];
 export const ARAC_DURUM_AD = Object.fromEntries(ARAC_DURUMLARI.map(s => [s.k, s.ad]));
-export const ROL_AD = { yonetici: 'Yönetici', masa: 'Masa', rapor: 'Rapor', sofor: 'Şoför', sorumlu: 'Araç sorumlusu', bot: 'Bot' };
+// 'yonetici' = ADMIN (Musa; kullanıcı, ayar, onay, ATLAS tam yetki). 'kurul' = YÖNETİM KURULU üyeleri (masa düzeyi). Referans bir rol DEĞİL: tablodaki REFERANS sütunu, arabayı ayarlayan kişi.
+export const ROL_AD = { yonetici: 'Admin', kurul: 'Yönetim kurulu', masa: 'Masa', rapor: 'Rapor', sofor: 'Şoför', sorumlu: 'Araç sorumlusu', bot: 'Bot' };
 export const VARIS = { ad: 'Fuar İzmir, Gaziemir', lat: 38.3472178, lon: 27.1196579 };
 
 // ---------------------------------------------------------------- olay yolu
@@ -57,10 +58,10 @@ export const store = {
 };
 export const benRol = () => store.ben?.rol;
 export const yoneticiMi = () => store.ben?.rol === 'yonetici';
-export const yazabilirMi = () => ['yonetici', 'masa'].includes(store.ben?.rol);
+export const yazabilirMi = () => ['yonetici', 'kurul', 'masa'].includes(store.ben?.rol);
 // şoför kendi aracının yolcularını, araç sorumlusu sorumlu olduğu kişileri ve araçlarının yolcularını işaretleyebilir (sunucu RLS de denetler)
 export function isaretleyebilirMi(f) {
-  const r = store.ben?.rol; if (r === 'yonetici' || r === 'masa') return true; if (!f) return false;
+  const r = store.ben?.rol; if (r === 'yonetici' || r === 'kurul' || r === 'masa') return true; if (!f) return false;
   const a = f.arac_id ? store.araclar.get(f.arac_id) : null;
   if (r === 'sofor') return !!a && a.sofor_kullanici === store.ben.id;
   if (r === 'sorumlu') return f.sorumlu_id === store.ben.id || (!!a && a.sorumlu_id === store.ben.id);
@@ -287,14 +288,32 @@ export async function kuyruguBosalt() {
 const kaynakAlan = (kaynak, metin) => ({ son_kaynak: kaynak || 'el', son_kaynak_metin: metin || null, kaynak_id: crypto.randomUUID() });
 function iyimser(ids, alanlar) {
   const onceki = ids.map(id => ({ id, ...pick(store.firmalar.get(id), Object.keys(alanlar)) }));
-  ids.forEach(id => { const f = store.firmalar.get(id); if (f) store.firmalar.set(id, { ...f, ...alanlar, durum_kim: store.ben?.ad_soyad, durum_zamani: alanlar.durum ? new Date().toISOString() : f.durum_zamani }); });
+  ids.forEach(id => { const f = store.firmalar.get(id); if (f) store.firmalar.set(id, { ...f, ...alanlar, ...(alanlar.durum ? { durum_kim: store.ben?.ad_soyad, durum_zamani: new Date().toISOString() } : {}) }); });
   bus.emit('firmalar'); return onceki;
 }
 const pick = (o, ks) => Object.fromEntries(ks.filter(k => o && k in o).map(k => [k, o[k]]));
 
 // Gün durumunu değiştir. ids: tek id ya da dizi. { kendi: true } = kendi geldi. Döner: geriAl() fonksiyonu.
+// OY KURALI (Musa 2026-09-30): "oy kullandı" yalnız masa onayıyla sayılır. Masa/Admin dışındakiler oy işaretlerse
+// durum değişmez, "oy bildirimi" (oy_bildiren) kaydedilir; masa Onayla/Reddet der. Sunucu tetikleyicisi de aynı kuralı zorlar.
+export const oyOnaylayabilirMi = () => ['yonetici', 'masa'].includes(store.ben?.rol);
+export const oyBekliyor = f => !!f?.oy_bildiren && f.durum !== 'oy_kullandi';
+export async function oyBildir(ids) {
+  ids = [].concat(ids); const kim = store.ben?.ad_soyad || null;
+  const onceki = iyimser(ids, { oy_bildiren: kim, oy_bildirim_zamani: new Date().toISOString() });
+  await yaz({ tur: 'firma', ids, alanlar: { oy_bildiren: kim, ...kaynakAlan('el', null) } });
+  return async () => { for (const o of onceki) { iyimser([o.id], { oy_bildiren: o.oy_bildiren ?? null, oy_bildirim_zamani: o.oy_bildirim_zamani ?? null }); await yaz({ tur: 'firma', ids: [o.id], alanlar: { oy_bildiren: o.oy_bildiren ?? null, ...kaynakAlan('el', 'oy bildirimi geri alındı') } }); } };
+}
+export async function oyOnayla(id) { return durumYap([id], 'oy_kullandi', { metin: `Masa onayı · bildiren ${store.firmalar.get(id)?.oy_bildiren || '?'}` }); }
+export async function oyReddet(id) {
+  const f = store.firmalar.get(id); if (!f) return; const eski = f.oy_bildiren;
+  iyimser([id], { oy_bildiren: null, oy_bildirim_zamani: null });
+  await yaz({ tur: 'firma', ids: [id], alanlar: { oy_bildiren: null, ...kaynakAlan('el', 'masa oy bildirimini reddetti') } });
+  return async () => { iyimser([id], { oy_bildiren: eski }); await yaz({ tur: 'firma', ids: [id], alanlar: { oy_bildiren: eski, ...kaynakAlan('el', 'ret geri alındı') } }); };
+}
 export async function durumYap(ids, durum, { kendi = null, kaynak = 'el', metin = null } = {}) {
   ids = [].concat(ids);
+  if (durum === 'oy_kullandi' && !oyOnaylayabilirMi() && store.ben?.rol !== 'bot') return oyBildir(ids.filter(i => store.firmalar.get(i)?.durum !== 'oy_kullandi'));
   const alanlar = { durum, ...(kendi !== null ? { kendi_geldi: !!kendi } : {}) };
   const onceki = iyimser(ids, alanlar);
   await yaz({ tur: 'firma', ids, alanlar: { ...alanlar, ...kaynakAlan(kaynak, metin) } });
@@ -322,7 +341,7 @@ export async function aracAta(ids, aracId, { kaynak = 'el', metin = null } = {})
   return async () => { for (const o of onceki) { iyimser([o.id], { arac_id: o.arac_id ?? null }); await yaz({ tur: 'firma', ids: [o.id], alanlar: { arac_id: o.arac_id ?? null, ...kaynakAlan('el', 'geri alındı') } }); } };
 }
 // ---------------------------------------------------------------- görev dağılımı ve şoför geri sayımı
-export const ekip = () => [...store.profiller.values()].filter(p => p.aktif && p.rol !== 'bot').sort((a, b) => a.ad_soyad.localeCompare(b.ad_soyad, 'tr'));
+export const ekip = () => [...store.profiller.values()].filter(p => p.aktif && p.rol !== 'bot' && !/\bbot(u)?\b/i.test(p.ad_soyad)).sort((a, b) => a.ad_soyad.localeCompare(b.ad_soyad, 'tr'));
 export async function sorumluAta(ids, kullaniciId, { kaynak = 'el', metin = null } = {}) {
   ids = [].concat(ids);
   const onceki = iyimser(ids, { sorumlu_id: kullaniciId });
@@ -351,7 +370,7 @@ export async function geriSayimYap(firmaId, adim, { kaynak = 'el', metin = null 
 // ---------------------------------------------------------------- bildirimler
 export const okunmamisBildirim = () => store.bildirimler.filter(b => !b.gorulme && !b.cevap).length;
 export const cevapsizBildirimler = () => store.bildirimler.filter(b => !b.cevap && b.secenekler?.length > 1 && Date.now() - new Date(b.zaman) > 10 * 60000);
-const CEVAP_DURUM = { 'Aldık': 'yolda', 'Yolda': 'yolda', 'Fuarda': 'fuarda', 'Fuarda ✓': 'fuarda', 'Oy kullandı': 'oy_kullandi' };
+const CEVAP_DURUM = { 'Aldık': 'yolda', 'Yolda': 'yolda', 'Fuarda': 'fuarda', 'Fuarda ✓': 'fuarda', 'Oy kullandı': 'oy_kullandi', 'Başkası karşıladı': 'fuarda' };
 export async function bildirimCevapla(id, cevap) {
   const b = store.bildirimler.find(x => x.id === id);
   const alan = { cevap, gorulme: b?.gorulme || new Date().toISOString() };
@@ -361,7 +380,25 @@ export async function bildirimCevapla(id, cevap) {
     const d = CEVAP_DURUM[cevap]; const f = store.firmalar.get(b.firma_id);
     if (d && f && f.durum !== d && !(f.durum === 'oy_kullandi')) await durumYap([b.firma_id], d, { kaynak: 'el', metin: `Bildirim cevabı: ${cevap}` });
     if (cevap === 'Sorun var') await notEkle(b.firma_id, 'Sorun bildirildi (bildirim cevabı)');
+    if (cevap === 'Karşıladım') await karsiladim(b.firma_id);
+    if (b.tur === 'oy_onay' && cevap === 'Onayla' && f?.durum !== 'oy_kullandi') await oyOnayla(b.firma_id);
+    if (b.tur === 'oy_onay' && cevap === 'Reddet' && f?.oy_bildiren) await oyReddet(b.firma_id);
   }
+}
+// REFERANS = kişiyi tanıyan yönetim kurulu üyesi; araç fuara gelince karşılar. Başkası da karşılayabilir: kim karşıladıysa o yazılır.
+export const referansBenMi = f => !!store.ben && [f?.referans, f?.referans2].some(r => r && trArama(r) === trArama(store.ben.ad_soyad));
+export async function karsiladim(id, kim = store.ben?.ad_soyad) {
+  const f = store.firmalar.get(id); if (!f) return;
+  const eski = { karsilayan: f.karsilayan ?? null, karsilama_zamani: f.karsilama_zamani ?? null, durum: f.durum };
+  iyimser([id], { karsilayan: kim, karsilama_zamani: new Date().toISOString() });
+  await yaz({ tur: 'firma', ids: [id], alanlar: { karsilayan: kim, ...kaynakAlan('el', null) } });
+  const durumDegisti = !['fuarda', 'oy_kullandi'].includes(f.durum);
+  if (durumDegisti) await durumYap([id], 'fuarda', { metin: `${kim} karşıladı` });
+  // geri al: karşılayanı ve (değiştiyse) durumu eski haline getirir
+  return async () => {
+    const alanlar = { karsilayan: eski.karsilayan, karsilama_zamani: eski.karsilama_zamani, ...(durumDegisti ? { durum: eski.durum } : {}) };
+    iyimser([id], alanlar); await yaz({ tur: 'firma', ids: [id], alanlar: { ...alanlar, ...kaynakAlan('el', 'karşılama geri alındı') } });
+  };
 }
 export async function bildirimGoruldu(ids) {
   ids = [].concat(ids).filter(id => { const b = store.bildirimler.find(x => x.id === id); return b && !b.gorulme; });
@@ -464,6 +501,7 @@ export function olayMetni(o) {
   if (o.tur === 'not') return `${kim} · not: ${String(o.yeni || '').split('\n').pop()}`;
   if (o.tur === 'arac') { const y = store.araclar.get(Number(o.yeni)); return `${kim} · araç: ${y ? fmt.plaka(y.plaka) : 'kaldırıldı'}`; }
   if (o.tur === 'arac_durum') return `${kim} · ${ARAC_DURUM_AD[o.yeni] || o.yeni}`;
+  if (o.tur === 'karsilama') return `${kim} · ${o.yeni} karşıladı`;
   if (o.tur === 'sorumlu') { const p = store.profiller.get(o.yeni); return `${kim} · sorumlu: ${p ? p.ad_soyad : 'kaldırıldı'}`; }
   if (o.tur === 'geri_sayim') { const g = GERI_SAYIM.find(x => x.k === o.yeni); return `${kim} · şoför: ${g ? g.ad.toLocaleLowerCase('tr') : o.yeni}`; }
   return `${kim} · ${o.tur}`;

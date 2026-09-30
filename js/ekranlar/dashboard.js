@@ -1,50 +1,59 @@
-// 72. Komite · Seçim Masası · DASHBOARD (ATLAS, 2026-09-30)
-// Masaüstü, 3 metreden okunur. Hedef ilerlemesi, saatlik geliş grafiği (inline SVG, kütüphane yok), referans liderlik
-// tablosu, "kesin bizde ama henüz gelmedi" eylem listesi, geciken alımlar, evrak uyarılı gelmeyenler, ilçe ve ulaşım.
-// Her rakam store'dan hesaplanır; canlı olay gelince yeniden çizilir (kaydırma, filtre ve grafik imleci korunur).
-import { store, esc, fmt, trBaslik, simdi, simdiDk, dakika, sayac, gecikme, ulasim, firmaListesi, aracOf } from '../core.js';
-import { rozetDurum, rozetSinif, plakaHtml, kisiKartiAc } from '../ui.js';
+// 72. Komite · Seçim Masası · DASHBOARD (Claude Design "SM Dashboard" hi-fi tasarımı, 2026-09-30)
+// 3 metreden okunur: hero "oy_bizde / hedef", saatlik geliş (gerçekleşen yeşil bar / beklenen kesik), referans liderlik tablosu,
+// ilçe dağılımı, araç kullanımı + boşta araçlar, ulaşım türü ve üç eylem listesi (Kesin bizde henüz gelmedi · Geciken alımlar · Evrak uyarılı).
+// Her rakam store'dan hesaplanır; canlı olay gelince yalnız değişen bölümün DOM'u yenilenir (kaydırma ve filtre korunur).
+import { store, esc, fmt, trBaslik, simdi, simdiDk, dakika, sayac, gecikme, ulasim, firmaListesi, aracOf, DURUM_AD, referansBenMi, karsiladim, isaretleyebilirMi } from '../core.js';
+import { kisiKartiAc, toast, hataGoster } from '../ui.js';
 
 const TERCIH_ANAHTAR = 'secim-dashboard-tercih';
-const YOKSAY = new Set(['asistan', 'istek', 'profil']);
-const GRAFIK_H = 340, PAD = { l: 48, r: 88, t: 34, b: 34 };
-const DURUM_SIRA = { bekliyor: 0, arandi: 1, yolda: 2, fuarda: 3 };
-const FILTRE_DURUM = [['hepsi', 'Hepsi'], ['bekliyor', 'Bekliyor'], ['arandi', 'Arandı'], ['yolda', 'Yolda'], ['fuarda', 'Fuarda']];
-const ULASIM_AD = { kendi: 'Kendi gelecek', servis: 'Servisle alınacak', yok: 'Ulaşımı belirsiz' };
+const YOKSAY = new Set(['asistan', 'istek', 'profil', 'baglanti']);
+// gelmedi listesinde sıra: ilerlemiş önce (yolda > arandı > bekliyor); fuarda olanlar zaten içeride, listede yok
+const GUN_SIRA = { bekliyor: 0, arandi: 1, yolda: 2 };
+const FILTRE_DURUM = [['hepsi', 'Hepsi'], ['yolda', 'Yolda'], ['arandi', 'Arandı'], ['bekliyor', 'Bekliyor']];
+const ULASIM_TUR = [['kendi', 'Kendi gelecek', 'var(--ink)'], ['servis', 'Servis', 'var(--red)'], ['yok', 'Belirsiz / yok', 'var(--amber)']];
+// "Beklenen" saatlik dağılım: tasarımdaki planlanan profil (09-17 için 8 saat, toplam 1). Farklı saat aralığında yeniden ölçeklenir.
+const PROFIL = [0.17, 0.2, 0.16, 0.1, 0.1, 0.1, 0.09, 0.08];
+const SEFER_ARA = 20 * 60000;   // aynı aracın 20 dk içindeki teslimleri tek sefer sayılır
 
-let kok = null, model = null, olcek = null, fare = null, ro = null, sonGenislik = 0;
-const onbellek = new Map();   // bölüm -> son HTML: değişmeyen bölümün DOM'u yeniden kurulmaz (275 satırlık liste ~20 ms)
-let tercih = { grup: false, durum: 'hepsi', ulasim: 'hepsi' };
+let kok = null, model = null;
+const onbellek = new Map();   // bölüm -> son HTML: değişmeyen bölümün DOM'u yeniden kurulmaz
+let tercih = { durum: 'hepsi', ulasim: 'hepsi' };
 try { tercih = { ...tercih, ...JSON.parse(localStorage.getItem(TERCIH_ANAHTAR) || '{}') }; } catch {}
 // eski ya da bozuk kayıt listeyi sessizce boşaltmasın
 if (!FILTRE_DURUM.some(([k]) => k === tercih.durum)) tercih.durum = 'hepsi';
 if (!['hepsi', 'kendi', 'servis', 'yok'].includes(tercih.ulasim)) tercih.ulasim = 'hepsi';
-tercih.grup = !!tercih.grup;
 const tercihKaydet = () => { try { localStorage.setItem(TERCIH_ANAHTAR, JSON.stringify(tercih)); } catch {} };
 
 // ---------------------------------------------------------------- yardımcılar
-const r1 = n => Math.round(n * 10) / 10;
 const iki = n => String(Math.floor(n)).padStart(2, '0');
 const saatYaz = dk => `${iki(((dk % 1440) + 1440) % 1440 / 60)}:${iki(((dk % 60) + 60) % 60)}`;
 const oyMu = f => f.durum === 'oy_kullandi';
-const yuzdeYaz = (a, b) => `%${fmt.yuzde(a, b)}`;
+const kolator = new Intl.Collator('tr', { sensitivity: 'base' });
 // Referans adları: "HARUN BULAN" -> "Harun Bulan"; "İK", "63 MK" gibi kısaltmalar olduğu gibi kalır
 const refAd = r => String(r || '').split(/\s+/).filter(Boolean).map(w => (w.length <= 2 ? w : trBaslik(w))).join(' ');
 const kisiAd = f => trBaslik(f.yetkili || f.unvan || '');
-const kolator = new Intl.Collator('tr', { sensitivity: 'base' });
-// kaç eleman <= m (sıralı dizide ikili arama)
-function kacTane(dizi, m) { let a = 0, b = dizi.length; while (a < b) { const o = (a + b) >> 1; if (dizi[o] <= m) a = o + 1; else b = o; } return a; }
-function guzelAdim(tepe, adet = 5) { const kaba = Math.max(1, tepe / adet); const us = 10 ** Math.floor(Math.log10(kaba)); const n = kaba / us; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * us; }
+const kisiKey = f => f.kisi_anahtar || `f${f.id}`;
+// "ALPER SEZER" -> "Alper S."
+function kisaAd(ad) {
+  const p = trBaslik(ad || '').split(/\s+/).filter(Boolean);
+  return p.length > 1 ? `${p[0]} ${p[p.length - 1].charAt(0).toLocaleUpperCase('tr')}.` : (p[0] || '');
+}
 // aranabilir ilk numara: cep, 2. cep, sonra sabit hatlar ("232... - 232..." gibi çoklu metin)
 function telSec(f) {
   for (const t of [f.cep, f.cep2, ...String(f.sabit_tel || '').split(/\s*[-/,;]\s*/)]) if (t && fmt.telLink(t)) return t;
   return null;
 }
-function ulasimRozet(f) {
-  const u = ulasim(f);
-  if (u === 'servis') return `<span class="rozet u-servis">Servis</span>`;
-  if (u === 'kendi') return `<span class="rozet u-kendi">Kendi</span>`;
-  return `<span class="rozet u-ulasimyok">Belirsiz</span>`;
+// 'HARUN BULAN · Rota 3' -> 'Rota 3'
+function rotaAd(f) {
+  if (!f.rota_kod) return '';
+  const m = String(f.rota_kod).match(/Rota\s*(\d+)/i);
+  return m ? `Rota ${m[1]}` : trBaslik(f.rota_kod);
+}
+// planlanan profil, n saatlik dilimlere bölünür (kümülatif doğrusal aradeğerleme; n=8 iken birebir profil)
+function beklenenAgirlik(n) {
+  const K = PROFIL.length, kum = [0]; PROFIL.forEach((w, i) => kum.push(kum[i] + w));
+  const C = t => { const x = Math.max(0, Math.min(K, t * K)), i = Math.min(K - 1, Math.floor(x)); return kum[i] + (kum[i + 1] - kum[i]) * (x - i); };
+  return Array.from({ length: n }, (_, j) => C((j + 1) / n) - C(j / n));
 }
 
 // ---------------------------------------------------------------- MODEL: tüm rakamlar store'dan
@@ -53,6 +62,7 @@ function hesapla() {
   const s = sayac();
   const hedef = Math.max(0, Number(s.hedef) || 0);
   const biz = hepsi.filter(f => f.oy_sinifi === 'bizde');
+  const bizim = hepsi.filter(f => f.oy_sinifi === 'bizde' || f.oy_sinifi === 'yolda');   // "bizim liste" = kesin bizde + ilzam yolda
 
   // zaman ekseni (ayarlar.zaman) + prova saati (?saat=10:30) kayması
   const z = store.ayarlar.zaman || {};
@@ -63,12 +73,16 @@ function hesapla() {
   const gunBasi = new Date(simdiT); gunBasi.setHours(0, 0, 0, 0);
   const simdiD = simdiDk();
 
-  // oy kullanma anı: olaylardaki son "oy kullandı"ya geçiş; olay yoksa (ya da store daha yeniyse) durum_zamani
-  const giris = new Map(), cozuldu = new Set();
-  for (const o of store.olaylar) {                       // en yeni başta
-    if (o.tur !== 'durum' || !o.firma_id || cozuldu.has(o.firma_id)) continue;
-    const y = String(o.yeni || '').startsWith('oy_kullandi'), e = String(o.eski || '').startsWith('oy_kullandi');
-    if (y && e) continue;                                  // yalnız "kendi geldi" düzeltmesi, geçiş anı değil
+  // oy kullanma anı: olaylardaki son "oy kullandı"ya geçiş; olay yoksa (ya da store daha yeniyse) durum_zamani.
+  // Aynı döngüde her firmanın son "fuarda" anı da toplanır (araç seferleri için).
+  const giris = new Map(), cozuldu = new Set(), fuardaAn = new Map();
+  for (const o of store.olaylar) {                          // en yeni başta
+    if (o.tur !== 'durum' || !o.firma_id) continue;
+    const yeni = String(o.yeni || ''), eski = String(o.eski || '');
+    if (yeni.startsWith('fuarda') && !fuardaAn.has(o.firma_id)) fuardaAn.set(o.firma_id, o.zaman);
+    if (cozuldu.has(o.firma_id)) continue;
+    const y = yeni.startsWith('oy_kullandi'), e = eski.startsWith('oy_kullandi');
+    if (y && e) continue;                                    // yalnız "kendi geldi" düzeltmesi, geçiş anı değil
     cozuldu.add(o.firma_id);
     if (y) giris.set(o.firma_id, o.zaman);
   }
@@ -77,660 +91,437 @@ function hesapla() {
     const t = ts ? new Date(ts).getTime() : NaN;
     return Number.isFinite(t) ? (t + kayma - gunBasi.getTime()) / 60000 : -Infinity;
   };
-  const oyBiz = biz.filter(oyMu), oyHepsi = hepsi.filter(oyMu);
-  const bizDk = oyBiz.map(dkOf).sort((a, b) => a - b);
-  const topDk = oyHepsi.map(dkOf).sort((a, b) => a - b);
 
-  const oran = Math.max(0, Math.min(1, (simdiD - bas) / (bit - bas)));
-  const beklenen = Math.round(hedef * oran);
-  const son30 = bizDk.filter(d => d > simdiD - 30 && d <= simdiD + 1).length;
+  // saatlik geliş: sütunlar oy verme saatleri; aralık dışı oylar en yakın sütuna yazılır (toplam hero ile tutsun)
+  const ilkSaat = Math.floor(bas / 60);
+  const adet = Math.max(1, Math.ceil(bit / 60) - ilkSaat);
+  const gercek = new Array(adet).fill(0);
+  for (const f of biz) if (oyMu(f)) gercek[Math.max(0, Math.min(adet - 1, Math.floor(dkOf(f) / 60) - ilkSaat))]++;
+  const agirlik = beklenenAgirlik(adet);
+  const beklenen = agirlik.map(w => Math.round(w * hedef));
+  const saatler = gercek.map((n, i) => ({ h: ilkSaat + i, gercek: n, beklenen: beklenen[i] }));
 
-  // referanslar (hedef = o referansın bizdeki sayısı, gelen = bunlardan oy kullanan)
+  // referans liderlik (hedef = o referansın kesin bizdeki sayısı, gelen = bunlardan oy kullanan)
   const refMap = new Map();
   for (const f of biz) {
     const k = f.referans || '';
-    const x = refMap.get(k) || { ref: k, hedef: 0, gelen: 0, diger: 0 };
+    const x = refMap.get(k) || { ref: k, hedef: 0, gelen: 0 };
     x.hedef++; if (oyMu(f)) x.gelen++;
     refMap.set(k, x);
   }
-  for (const f of oyHepsi) if (f.oy_sinifi !== 'bizde' && refMap.has(f.referans || '')) refMap.get(f.referans || '').diger++;
   const referanslar = [...refMap.values()]
     .map(x => ({ ...x, kalan: Math.max(0, x.hedef - x.gelen), yuzde: x.hedef ? x.gelen / x.hedef : 0 }))
     .sort((a, b) => b.yuzde - a.yuzde || b.gelen - a.gelen || b.hedef - a.hedef || (!a.ref - !b.ref) || kolator.compare(a.ref, b.ref));
 
-  // ilçe
+  // ilçe (bizim liste: hedef ve gelen)
   const ilceMap = new Map();
-  for (const f of biz) {
+  for (const f of bizim) {
     const k = f.ilce || '';
     const x = ilceMap.get(k) || { ilce: k, hedef: 0, gelen: 0 };
     x.hedef++; if (oyMu(f)) x.gelen++; ilceMap.set(k, x);
   }
   const ilceler = [...ilceMap.values()].sort((a, b) => b.hedef - a.hedef || b.gelen - a.gelen || kolator.compare(a.ilce, b.ilce));
 
-  // ulaşım
-  const ul = { kendi: { hedef: 0, gelen: 0 }, servis: { hedef: 0, gelen: 0, saatli: 0, arac: 0, geciken: 0 }, yok: { hedef: 0, gelen: 0 } };
-  for (const f of biz) {
-    const u = ul[ulasim(f)]; u.hedef++; if (oyMu(f)) u.gelen++;
-    if (ulasim(f) === 'servis') { if (f.tasima_saati) u.saatli++; if (f.arac_id) u.arac++; if (gecikme(f, simdiD) > 0) u.geciken++; }
-  }
+  // ulaşım (bizim liste)
+  const ul = { kendi: 0, servis: 0, yok: 0 };
+  for (const f of bizim) ul[ulasim(f)]++;
 
-  const gelmedi = biz.filter(f => !oyMu(f));
+  // araç kullanımı: araca atanmış kişiler (aynı kişi birden çok firmada tek sayılır)
+  const gruplar = new Map();
+  for (const f of hepsi) {
+    if (!f.arac_id || !store.araclar.has(f.arac_id)) continue;
+    const g = gruplar.get(f.arac_id) || { atanan: new Set(), tasinan: new Set(), yolda: new Set(), bekleyen: new Set(), teslim: [] };
+    const k = kisiKey(f); g.atanan.add(k);
+    if (f.durum === 'yolda') g.yolda.add(k);
+    else if (f.durum === 'bekliyor' || f.durum === 'arandi') g.bekleyen.add(k);
+    else if ((f.durum === 'fuarda' || f.durum === 'oy_kullandi') && !f.kendi_geldi && !g.tasinan.has(k)) {
+      g.tasinan.add(k);
+      const t = f.geri_sayim === 'birakti' && f.geri_sayim_zamani ? Date.parse(f.geri_sayim_zamani)
+        : fuardaAn.has(f.id) ? Date.parse(fuardaAn.get(f.id))
+        : f.durum === 'fuarda' && f.durum_zamani ? Date.parse(f.durum_zamani) : NaN;
+      if (Number.isFinite(t)) g.teslim.push(t);
+    }
+    gruplar.set(f.arac_id, g);
+  }
+  const seferSay = g => {
+    const t = g.teslim.sort((a, b) => a - b); let sefer = 0, son = -Infinity;
+    for (const x of t) { if (x - son > SEFER_ARA) sefer++; son = x; }
+    if (g.yolda.size) sefer++;                                       // şu an yolcu taşıyan sefer
+    return Math.max(sefer, g.tasinan.size ? 1 : 0);
+  };
+  const kullanim = [...gruplar.entries()].map(([id, g]) => ({
+    a: store.araclar.get(id), tasinan: g.tasinan.size, yolda: g.yolda.size, atanan: g.atanan.size, sefer: seferSay(g),
+  })).sort((x, y) => (y.tasinan + y.yolda) - (x.tasinan + x.yolda) || y.atanan - x.atanan || kolator.compare(x.a.plaka || '', y.a.plaka || ''));
+  const bosta = [...store.araclar.values()].filter(a => {
+    const g = gruplar.get(a.id); return a.durum === 'hazir' && (!g || (!g.bekleyen.size && !g.yolda.size));
+  }).sort((a, b) => kolator.compare(a.plaka || '', b.plaka || ''));
+
+  // listeler
+  const gelmediHam = biz.filter(f => !oyMu(f) && f.durum !== 'fuarda');
   const geciken = hepsi.map(f => ({ f, dk: gecikme(f, simdiD) })).filter(x => x.dk > 0).sort((a, b) => b.dk - a.dk);
-  const evrak = hepsi.filter(f => f.evrak_uyari && !oyMu(f) && !['karsi', 'oy_yok'].includes(f.oy_sinifi))
+  const evrak = bizim.filter(f => f.evrak_uyari && !oyMu(f))
     .sort((a, b) => (a.oy_sinifi === 'bizde' ? 0 : 1) - (b.oy_sinifi === 'bizde' ? 0 : 1) || kolator.compare(a.yetkili || a.unvan || '', b.yetkili || b.unvan || ''));
 
-  return {
-    s, hedef, elle: store.ayarlar.hedef?.elle != null, bas, bit, simdiD, kayma, beklenen, son30,
-    bizDk, topDk, referanslar, ilceler, ul, gelmedi, geciken, evrak,
-    bizKendi: biz.filter(f => f.kendi_geldi).length,
-    bizFuarda: biz.filter(f => f.durum === 'fuarda').length,
-    bizYolda: biz.filter(f => f.durum === 'yolda').length,
-  };
+  return { s, hedef, elle: store.ayarlar.hedef?.elle != null, bas, bit, simdiD, saatler, referanslar, ilceler, ul, ulToplam: ul.kendi + ul.servis + ul.yok, kullanim, bosta, gelmediHam, geciken, evrak };
 }
 
 // ---------------------------------------------------------------- stil (bir kez)
 function stilEkle() {
-  if (document.querySelector('style[data-ekran="dashboard"]')) return;
+  const eski = document.querySelector('style[data-ekran="dashboard"]'); if (eski) eski.remove();
   const st = document.createElement('style'); st.dataset.ekran = 'dashboard';
   st.textContent = `
-.db { --db-biz: var(--kirmizi); --db-top: var(--mavi); font-size: 15px; }
-:root[data-tema="koyu"] .db { --db-biz: #E0364F; --db-top: #4C82F0; }
-.db .sayfa-baslik { margin-bottom: 14px; }
-.db .sayfa-baslik h1 { font-size: 28px; }
-.db-canli { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--metin-2); }
-.db-canli::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--yesil); box-shadow: 0 0 0 3px var(--yesil-acik); animation: nabiz 2s infinite; }
-.db-canli.kopuk { color: var(--turuncu); }
-.db-canli.kopuk::before { background: var(--turuncu); box-shadow: 0 0 0 3px var(--turuncu-acik); animation-duration: 1s; }
-.db .kart-baslik { font-size: 15px; padding: 14px 18px; flex-wrap: wrap; }
-.db .kart-baslik .alt { font-size: 12.5px; }
-.db-izgara { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; margin-top: 16px; align-items: stretch; }
-.db-s8 { grid-column: span 8; min-width: 0; } .db-s4 { grid-column: span 4; min-width: 0; } .db-s12 { grid-column: 1 / -1; min-width: 0; }
-.db-kaydir { overflow: auto; overscroll-behavior: contain; }
-.db-bos-iyi { padding: 22px 16px; text-align: center; color: var(--yesil); font-weight: 800; }
+.icerik.db-tam { max-width: none; margin: 0; padding: 16px 20px; display: flex; flex-direction: column; }
+.kabuk:has(> .icerik.db-tam) { height: 100vh; height: 100dvh; min-height: 0; }
+.icerik.db-tam { flex: 1 1 0; min-height: 0; overflow: hidden; }
+.db { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: clamp(420px, 36.11vw, 700px) minmax(0, 1fr) clamp(320px, 26.39vw, 460px); grid-template-rows: minmax(0, 1fr); gap: 14px; color: var(--ink); font-family: 'Inter', system-ui, sans-serif; line-height: normal; }
+.db-kol { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
+.db-kart { min-width: 0; min-height: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.db-baslik { font-size: 11px; font-weight: 800; letter-spacing: .1em; white-space: nowrap; text-transform: uppercase; }
+.db-not { margin-left: auto; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.db-iyi { padding: 14px 16px; color: var(--green); font-weight: 800; font-size: 13px; }
+.db-yok { padding: 14px 16px; color: var(--ink-3); font-size: 13px; }
+.db button { font-family: inherit; }
+.db .kaydir { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 
-/* kahraman: hedef ilerlemesi */
-.db-kahraman { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 28px; padding: 22px 26px 24px; }
-.db-etiket { font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--metin-3); display: flex; align-items: center; gap: 8px; }
-.db-dev { display: flex; align-items: baseline; gap: 14px; line-height: .92; margin: 10px 0 18px; flex-wrap: wrap; }
-.db-dev-sayi { font-size: clamp(76px, 8.4vw, 140px); font-weight: 900; letter-spacing: -.045em; color: var(--kirmizi); }
-.db-dev-hedef { font-size: clamp(30px, 3.1vw, 52px); font-weight: 800; color: var(--metin-3); letter-spacing: -.02em; }
-.db-dev-yuzde { margin-left: auto; font-size: clamp(44px, 4.6vw, 78px); font-weight: 900; letter-spacing: -.035em; color: var(--metin); }
-.db-kc { position: relative; height: 20px; border-radius: 999px; background: var(--kirmizi-acik); }
-.db-kc > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--kirmizi); border-radius: 999px; transition: width .5s; }
-.db-kc > b { position: absolute; top: -7px; bottom: -7px; width: 3px; margin-left: -1.5px; background: var(--metin); border-radius: 2px; box-shadow: 0 0 0 2px var(--yuzey); }
-.db-tempo { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; font-size: 15px; font-weight: 600; color: var(--metin-2); }
-.db-tempo b { color: var(--metin); font-weight: 900; }
-.db-fark { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-weight: 900; font-size: 16px; }
-.db-fark.iyi { background: var(--yesil-acik); color: var(--yesil); }
-.db-fark.kotu { background: var(--turuncu-acik); color: var(--turuncu); }
-.db-fark.notr { background: var(--yuzey-3); color: var(--metin-2); }
-.db-kutular { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-content: center; }
-.db-kutu { background: var(--yuzey-2); border: 1px solid var(--cizgi); border-radius: var(--r-2); padding: 12px 14px; min-width: 0; }
-.db-kutu .e { font-size: 11.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--metin-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.db-kutu .d { font-size: 40px; font-weight: 900; letter-spacing: -.03em; line-height: 1.05; margin-top: 4px; }
-.db-kutu .a { font-size: 12.5px; color: var(--metin-3); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.db-kutu.uyari { background: var(--turuncu-acik); border-color: var(--turuncu); }
-.db-kutu.uyari .d, .db-kutu.uyari .e { color: var(--turuncu); }
-.db-kutu.iyi .d { color: var(--yesil); }
+/* hero */
+.db-hero { flex: none; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+.db-h-ust { display: flex; align-items: center; gap: 8px; }
+.db-h-ust .db-baslik { font-size: 12px; letter-spacing: .12em; }
+.db-h-ust .db-not { font-size: 12px; }
+.db-tam-dugme { flex: none; width: 26px; height: 26px; margin: -6px 0 -6px 4px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2); font-size: 14px; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.db-tam-dugme:hover { background: var(--hover); color: var(--ink); }
+.db-dev { display: flex; align-items: baseline; gap: 10px; line-height: .9; white-space: nowrap; }
+.db-dev-sayi { font-size: clamp(110px, 10.42vw, 200px); font-weight: 900; letter-spacing: -.05em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.db-dev-hedef { font-size: clamp(38px, 3.61vw, 70px); font-weight: 800; letter-spacing: -.03em; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.db-hbar { position: relative; height: 18px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.db-hbar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--red); border-radius: 99px; transition: width .5s; }
+.db-hbar > b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--surface); }
+.db-hsatir { display: flex; gap: 16px; font-size: 15px; color: var(--ink-2); font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+.db-hsatir b { color: var(--ink); }
+.db-hsatir .k b { color: var(--red); font-size: 20px; }
+.db-hsatir .k2 b { font-size: 20px; }
+.db-hsatir .sag { margin-left: auto; }
+.db-mini-kap { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
+.db-mini { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; min-width: 0; }
+.db-mini .e { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--ink-3); white-space: nowrap; }
+.db-mini .e i { width: 8px; height: 8px; border-radius: 99px; flex: none; }
+.db-mini .d { font-size: 40px; font-weight: 900; letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; color: var(--ink); }
+.db-mini .d.uyari { color: var(--amber-ink); }
 
-/* grafik */
-.db-lejant { display: flex; gap: 16px; font-size: 12.5px; font-weight: 700; color: var(--metin-2); flex-wrap: wrap; }
-.db-lejant span { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
-.db-lejant i { display: inline-block; width: 18px; height: 0; border-top: 2.5px solid; border-radius: 2px; }
-.db-lejant i.biz { border-color: var(--db-biz); } .db-lejant i.top { border-color: var(--db-top); border-top-width: 2px; }
-.db-lejant i.tem { border-color: var(--db-biz); border-top-style: dashed; opacity: .6; border-top-width: 2px; }
-.db-grafik { position: relative; padding: 6px 8px 0 4px; }
-.db-grafik svg { display: block; width: 100%; height: auto; overflow: visible; outline: none; }
-.db-grafik svg:focus-visible { box-shadow: 0 0 0 3px var(--kirmizi-acik); border-radius: 8px; }
-.db-g-izgara { stroke: var(--cizgi); stroke-width: 1; shape-rendering: crispEdges; }
-.db-g-eksen { stroke: var(--cizgi-2); stroke-width: 1; shape-rendering: crispEdges; }
-.db-g-yazi { fill: var(--metin-3); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.db-g-hedef-yazi { fill: var(--metin-2); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
-.db-g-biz { fill: none; stroke: var(--db-biz); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
-.db-g-alan { fill: var(--db-biz); opacity: .1; }
-.db-g-top { fill: none; stroke: var(--db-top); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.db-g-tempo { fill: none; stroke: var(--db-biz); stroke-width: 1.75; stroke-dasharray: 6 5; opacity: .5; }
-.db-g-simdi { stroke: var(--metin-2); stroke-width: 1; shape-rendering: crispEdges; }
-.db-g-hap { fill: var(--koyu); } :root[data-tema="koyu"] .db-g-hap { fill: var(--yuzey-3); }
-.db-g-hap-yazi { fill: #fff; font-size: 11.5px; font-weight: 800; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
-.db-g-n-biz { fill: var(--db-biz); stroke: var(--yuzey); stroke-width: 2; }
-.db-g-n-top { fill: var(--db-top); stroke: var(--yuzey); stroke-width: 2; }
-.db-g-n-tem { fill: var(--yuzey); stroke: var(--db-biz); stroke-width: 2; opacity: .8; }
-.db-g-deger { fill: var(--metin); font-size: 17px; font-weight: 900; font-variant-numeric: tabular-nums; }
-.db-g-deger-alt { fill: var(--metin-3); font-size: 12px; font-weight: 700; }
-.db-g-imlec { stroke: var(--metin-3); stroke-width: 1; shape-rendering: crispEdges; }
-.db-g-bilgi { fill: var(--metin-2); font-size: 15px; font-weight: 800; }
-.db-g-perde { fill: var(--yuzey); opacity: .94; }
-.db-ipucu { position: absolute; top: 40px; pointer-events: none; background: var(--yuzey); border: 1px solid var(--cizgi-2); box-shadow: var(--golge-2); border-radius: 10px; padding: 9px 12px; font-size: 13px; min-width: 190px; z-index: 3; }
-.db-ipucu .s { font-weight: 800; color: var(--metin-3); font-size: 12px; letter-spacing: .06em; margin-bottom: 6px; }
-.db-ipucu .r { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
-.db-ipucu .r i { width: 14px; height: 0; border-top: 2.5px solid; flex: none; }
-.db-ipucu .r b { font-size: 16px; font-weight: 900; min-width: 34px; font-variant-numeric: tabular-nums; }
-.db-ipucu .r span { color: var(--metin-3); font-weight: 600; }
-.db-saatler { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; padding: 10px 14px 14px; border-top: 1px solid var(--cizgi); }
-.db-saat { text-align: center; border-radius: 8px; padding: 6px 2px 5px; min-width: 0; }
-.db-saat.simdi { background: var(--kirmizi-acik); }
-.db-saat .s { font-size: 11px; font-weight: 800; color: var(--metin-3); letter-spacing: .05em; font-variant-numeric: tabular-nums; }
-.db-saat .n { font-size: 20px; font-weight: 900; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.db-saat .t { font-size: 11px; color: var(--metin-3); font-weight: 600; white-space: nowrap; }
-.db-saat.gelecek .n { color: var(--metin-3); opacity: .45; }
+/* saatlik geliş */
+.db-saatlik { flex: 1 1 0; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.db-sat-ust { flex: none; display: flex; align-items: center; gap: 14px; }
+.db-lej { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-2); white-space: nowrap; }
+.db-sat-ust .db-baslik + .db-lej { margin-left: auto; }
+.db-lej i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; box-sizing: border-box; }
+.db-lej i.g { background: var(--green); } .db-lej i.b { border: 1.5px dashed var(--ink-3); }
+.db-sutunlar { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(var(--db-n, 8), minmax(0, 1fr)); gap: 10px; align-items: end; }
+.db-sutun { height: 100%; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; min-width: 0; }
+.db-sutun .n { height: 18px; font-size: 14px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums; color: var(--ink); line-height: 18px; }
+.db-sutun .iz { flex: 1; position: relative; min-height: 0; }
+.db-sutun .iz .bek { position: absolute; left: 0; right: 0; bottom: 0; border: 1.5px dashed var(--ink-3); border-radius: 6px; box-sizing: border-box; opacity: .55; }
+.db-sutun .iz .ger { position: absolute; left: 6px; right: 6px; bottom: 0; background: var(--green); border-radius: 5px; transition: height .5s; }
+.db-sutun .iz .ger.simdi { background: repeating-linear-gradient(135deg, var(--green) 0 6px, var(--green-soft) 6px 10px); }
+.db-sutun .s { font-size: 12px; font-weight: 700; text-align: center; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.db-sutun .s.simdi { color: var(--red); }
 
 /* referans liderlik */
-.db-lider { display: flex; flex-direction: column; contain: size; min-height: 440px; }
-.db-lider .db-kaydir { flex: 1 1 0; min-height: 0; }
-.db-tablo { font-size: 14px; }
-.db-tablo th { padding: 9px 8px; }
-.db-tablo td { padding: 9px 8px; }
-.db-lider .db-tablo th { padding: 9px 6px; letter-spacing: .03em; }
-.db-lider .db-tablo td { padding: 9px 6px; }
-.db-lider .db-tablo th:first-child, .db-lider .db-tablo td:first-child { padding-left: 14px; }
-.db-tablo th.num, .db-tablo td.num { text-align: right; font-variant-numeric: tabular-nums; }
-.db-tablo td.num { font-weight: 700; }
-.db-tablo .sira { color: var(--metin-3); font-weight: 800; width: 24px; font-variant-numeric: tabular-nums; }
-.db-tablo .ref { font-weight: 800; line-height: 1.25; }
-.db-tablo .ref small { display: block; font-size: 11.5px; color: var(--metin-3); font-weight: 600; }
-.db-tablo td.yuzde { font-weight: 900; font-size: 16px; }
-.db-tablo tr.tamam td.yuzde { color: var(--yesil); }
-.db-mini { width: 52px; height: 8px; border-radius: 999px; background: var(--gri-acik); overflow: hidden; }
-.db-mini > i { display: block; height: 100%; background: var(--kirmizi); border-radius: 999px; }
-.db-mini.tamam > i { background: var(--yesil); }
-.db-tablo tr:focus-visible td { background: var(--kirmizi-acik); outline: none; }
+.db-lider { flex: 1.25 1 0; display: flex; flex-direction: column; overflow: hidden; }
+.db-lider .db-baslik { flex: none; padding: 14px 18px 10px; }
+.db-lg { display: grid; grid-template-columns: 22px minmax(0, 1fr) 46px 46px 46px 46px 64px; gap: 10px; align-items: center; padding: 0 18px; font-variant-numeric: tabular-nums; }
+.db-lg.bas { flex: none; padding-bottom: 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .07em; color: var(--ink-3); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.db-lg.bas > :nth-child(n+3):nth-child(-n+6) { text-align: right; }
+.db-lider .kaydir { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.db-lg.satir { height: 34px; box-sizing: content-box; border-bottom: 1px solid var(--line); font-size: 14px; outline: none; }
+.db-lg.satir[data-ref] { cursor: pointer; }
+.db-lg.satir[data-ref]:hover, .db-lg.satir[data-ref]:focus-visible { background: var(--hover); }
+.db-lg.satir .sr { font-weight: 700; color: var(--ink-3); }
+.db-lg.satir .ad { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.db-lg.satir .h { text-align: right; color: var(--ink-2); }
+.db-lg.satir .g { text-align: right; font-weight: 800; }
+.db-lg.satir .y { text-align: right; font-weight: 800; color: var(--red); }
+.db-lg.satir .k { text-align: right; color: var(--ink-2); }
+.db-lg.satir .br { height: 8px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.db-lg.satir .br > i { display: block; height: 100%; border-radius: 99px; background: var(--ink-3); }
+.db-lg.satir .br > i.ilk { background: var(--red); }
 
-/* gelmedi listesi */
-.db-baslik-buyuk { font-size: 17px; font-weight: 900; letter-spacing: -.01em; }
-.db-kontrol { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.db-kontrol .girdi { height: 30px; width: auto; font-size: 12.5px; font-weight: 600; padding: 0 8px; }
-.db-grup-dugme { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; color: var(--metin-2); cursor: pointer; background: none; border: 0; padding: 0; }
-.db-gelmedi { display: flex; flex-direction: column; }
-.db-gelmedi .db-kaydir { flex: 1 1 auto; max-height: 660px; }
-.db-ad { font-weight: 800; }
-.db-firma { font-size: 12px; color: var(--metin-3); font-weight: 500; max-width: 340px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.db-tel-h { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-.db-tel { font-weight: 700; font-variant-numeric: tabular-nums; }
-.db-rozetler { display: flex; gap: 4px; flex-wrap: wrap; }
-/* sabit sütunlar: Kişi kalan genişliği alır, uzun ad ve ünvan kırpılır; tablo kartın dışına taşmaz */
-.db-gt { table-layout: fixed; min-width: 760px; }
-.db-gt th.w-ref { width: 130px; } .db-gt th.w-tel { width: 186px; } .db-gt th.w-ul { width: 124px; }
-.db-gt th.w-saat { width: 70px; } .db-gt th.w-durum { width: 152px; }
-.db-gt td { overflow: hidden; }
-.db-gt .db-ad, .db-gt .db-firma, .db-kes { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: none; }
-.db-gec-k { font-size: 12.5px; font-weight: 900; color: var(--turuncu); white-space: nowrap; margin-top: 2px; }
-.db-gt tr.db-gec-satir td:first-child { box-shadow: inset 3px 0 0 var(--turuncu); }
-.db-tablo tr.db-grup td { background: var(--yuzey-3); font-weight: 800; padding: 8px 12px; }
-.db-tablo tr.db-grup td small { color: var(--metin-3); font-weight: 600; margin-left: 8px; font-size: 12px; }
-.db-tablo tr.db-grup[data-ref=""] { cursor: default; }
+/* ilçe dağılımı */
+.db-ilce { flex: 1 1 0; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.db-ilce .db-ust, .db-arac .db-ust { flex: none; display: flex; align-items: center; }
+.db-ilce .kaydir { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; }
+.db-i { display: grid; grid-template-columns: 92px minmax(0, 1fr) 64px; gap: 10px; align-items: center; font-size: 13px; cursor: pointer; outline: none; border-radius: 6px; flex: none; }
+.db-i:hover, .db-i:focus-visible { background: var(--hover); }
+.db-i .ad { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.db-i .iz { position: relative; height: 14px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+.db-i .iz > span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--line-2); }
+.db-i .iz > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--red); }
+.db-i .sy { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.db-i .sy small { color: var(--ink-3); font-weight: 500; font-size: 13px; }
 
-/* yan listeler */
-.db-yan { display: flex; flex-direction: column; gap: 16px; min-width: 0; contain: size; min-height: 560px; }
-.db-yan > .kart { display: flex; flex-direction: column; min-height: 0; }
-.db-yan > .db-yan-ust { flex: 0 1 auto; max-height: 55%; }
-.db-yan > .db-yan-alt { flex: 1 1 0; min-height: 150px; }
-.db-yan .db-kaydir { flex: 1 1 auto; min-height: 0; }
-.db-satir { display: flex; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--cizgi); cursor: pointer; }
-.db-satir:last-child { border-bottom: 0; }
-.db-satir:hover, .db-satir:focus-visible { background: var(--yuzey-2); outline: none; }
-.db-satir-ana { flex: 1; min-width: 0; }
-.db-satir-alt { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 5px; font-size: 12px; }
-.db-satir-sag { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
-.db-gec { font-size: 20px; font-weight: 900; color: var(--turuncu); line-height: 1; font-variant-numeric: tabular-nums; }
-.db-evrak-yazi { font-size: 12.5px; font-weight: 700; color: var(--sari); margin-top: 3px; }
-.db-evrak-yazi::before { content: '⚠ '; }
-.db-zayif { color: var(--metin-3); font-size: 12px; font-weight: 600; }
+/* araç kullanımı */
+.db-arac { flex: 1.1 1 0; padding: 14px 18px; display: flex; flex-direction: column; gap: 7px; overflow: hidden; }
+.db-arac .kaydir { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 5px; }
+.db-av { display: grid; grid-template-columns: 96px minmax(0, 1fr) 56px 44px; gap: 8px; align-items: center; border: 0; background: none; padding: 0; cursor: pointer; color: var(--ink); text-align: left; flex: none; border-radius: 4px; }
+.db-av:hover, .db-av:focus-visible { background: var(--hover); outline: none; }
+.db-pl { display: inline-flex; align-items: stretch; box-sizing: content-box; height: 20px; border: 1.2px solid #111; border-radius: 3px; background: #fff; overflow: hidden; justify-self: start; }
+.db-pl > i { width: 6px; background: #1F4FA8; }
+.db-pl > b { padding: 0 5px; display: flex; align-items: center; font-size: 11px; font-weight: 800; color: #111; white-space: nowrap; }
+.db-av .br { position: relative; height: 12px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+.db-av .br > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink); border-radius: 4px; }
+.db-av .br > i.ariza { background: var(--amber); }
+.db-av .kisi { font-size: 12.5px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.db-av .sef { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.db-bosta { flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid var(--line); max-height: 62px; overflow: auto; }
+.db-bosta > span { font-size: 11.5px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+.db-bosta button { height: 22px; padding: 0 7px; border-radius: 5px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font-size: 11.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.db-bosta button:hover { background: var(--hover); }
 
-/* ilçe + ulaşım */
-.db-cubuklar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-flow: column; gap: 10px 32px; }
-.db-cs { display: grid; grid-template-columns: 112px minmax(0, 1fr) 96px; align-items: center; gap: 12px; font-size: 14px; }
-.db-cs .ad { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.db-cs .iz { position: relative; height: 14px; }
-.db-cs .iz > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--kirmizi-acik); }
-.db-cs .iz > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--kirmizi); }
-.db-cs .sy { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.db-cs .sy small { color: var(--metin-3); font-weight: 600; font-size: 12px; }
-.db-cs-lejant { display: flex; gap: 16px; font-size: 12px; font-weight: 700; color: var(--metin-2); }
-.db-cs-lejant span { display: inline-flex; align-items: center; gap: 6px; }
-.db-cs-lejant i { width: 12px; height: 10px; border-radius: 3px; display: inline-block; }
-.db-ul { display: flex; flex-direction: column; gap: 18px; }
-.db-ul-ust { display: flex; align-items: baseline; gap: 10px; margin-bottom: 7px; }
-.db-ul-ad { font-weight: 800; font-size: 15px; }
-.db-ul-say { margin-left: auto; font-size: 26px; font-weight: 900; letter-spacing: -.02em; }
-.db-ul-say small { font-size: 15px; color: var(--metin-3); font-weight: 700; }
-.db-ul-yuzde { font-weight: 900; font-size: 15px; color: var(--metin-2); min-width: 48px; text-align: right; }
-.db-ul .cubuk { height: 10px; }
-.db-ul-not { font-size: 12.5px; color: var(--metin-3); font-weight: 600; margin-top: 6px; }
+/* ulaşım türü */
+.db-ulasim { flex: none; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+.db-ul-bar { display: flex; height: 14px; border-radius: 99px; overflow: hidden; gap: 2px; background: var(--surface-3); }
+.db-ul-bar > div { transition: flex-grow .5s; }
+.db-ul-uc { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.db-ul-oge { display: flex; flex-direction: column; gap: 1px; text-align: left; border: 0; background: none; padding: 4px 6px; margin: -4px -6px; border-radius: 8px; cursor: pointer; color: var(--ink); min-width: 0; }
+.db-ul-oge:hover { background: var(--hover); }
+.db-ul-oge.aktif { box-shadow: inset 0 0 0 1.5px var(--red); }
+.db-ul-oge .e { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: var(--ink-3); white-space: nowrap; }
+.db-ul-oge .e i { width: 8px; height: 8px; border-radius: 99px; flex: none; }
+.db-ul-oge .d { font-size: 28px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1.1; }
 
-@media (max-width: 1280px) {
-  .db-kahraman { grid-template-columns: 1fr; }
+/* eylem listeleri */
+.db-liste { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; }
+.db-l-ust { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px 8px; }
+.db-l-ust .n { margin-left: auto; font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.db-l-cip { flex: none; display: flex; gap: 5px; flex-wrap: wrap; padding: 0 16px 8px; }
+.db-cip { height: 22px; padding: 0 9px; border-radius: 99px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2); font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.db-cip:hover { background: var(--hover); }
+.db-cip.aktif { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.db-cip small { font-size: 11px; font-weight: 800; opacity: .65; }
+.db-liste .kaydir { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.db-oge { display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-top: 1px solid var(--line); }
+.db-oge .ana { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.db-oge .ad { border: 0; background: none; padding: 0; text-align: left; font-size: 13.5px; font-weight: 700; color: var(--ink); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.db-oge .ad:hover { text-decoration: underline; }
+.db-oge .meta { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.db-oge .meta em { font-style: normal; font-weight: 800; color: var(--amber-ink); }
+.db-ara { flex: none; box-sizing: content-box; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); color: var(--ink); font-size: 12px; font-weight: 700; display: flex; align-items: center; white-space: nowrap; background: var(--surface); }
+.db-ara:hover { background: var(--hover); color: var(--ink); }
+.db-ara.yok { opacity: .4; pointer-events: none; }
+.db-karsila { flex: none; box-sizing: content-box; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--red-line); background: var(--red-soft); color: var(--red); font-size: 12px; font-weight: 800; white-space: nowrap; cursor: pointer; }
+.db-karsila:hover { background: var(--red); color: var(--on-red); }
+.db-karsila:disabled { opacity: .5; cursor: default; }
+.db-oge .meta .kars { color: var(--green); font-weight: 700; }
+
+/* dar ekran: tek sütun, sayfa kayar */
+@media (max-width: 1240px) {
+  .kabuk:has(> .icerik.db-tam) { height: auto; min-height: 100vh; }
+  .icerik.db-tam { display: block; overflow: visible; padding: 14px; }
+  .db { display: flex; flex-direction: column; gap: 14px; }
+  .db-kol { display: contents; }
+  .db-kart { flex: none; }
+  .db-saatlik { height: 340px; }
+  .db-lider { height: 440px; }
+  .db-ilce { max-height: 360px; } .db-arac { max-height: 360px; }
+  .db-liste { height: 340px; }
+  .db-dev-sayi { font-size: 96px; } .db-dev-hedef { font-size: 34px; }
 }
-@media (max-width: 1100px) {
-  .db-s8, .db-s4 { grid-column: 1 / -1; }
-  .db-lider { contain: none; min-height: 0; }
-  .db-lider .db-kaydir { flex: none; max-height: 520px; }
-  .db-cubuklar { grid-template-columns: 1fr; grid-auto-flow: row; grid-template-rows: none !important; }
-  .db-yan { contain: none; min-height: 0; }
-  .db-yan > .db-yan-ust, .db-yan > .db-yan-alt { flex: none; max-height: none; }
-  .db-yan .db-kaydir { max-height: 330px; }
-}
-@media (max-width: 640px) {
-  .db-kutular { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .db-kutu .d { font-size: 30px; }
-  .db-kutu .e, .db-kutu .a { white-space: normal; }
-  .db-kahraman { padding: 16px; }
-  .db-saatler { overflow-x: auto; grid-auto-columns: minmax(64px, 1fr); }
-  .db-lider .db-tablo th:last-child, .db-lider .db-tablo td:last-child { display: none; }
-  /* gelmedi listesi telefonda satır başına küçük kart olur (yana kaydırma yok) */
-  .db-gt { min-width: 0; table-layout: auto; display: block; }
-  .db-gt thead { display: none; }
-  .db-gt tbody { display: block; }
-  .db-gt tr[data-kisi] { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "kisi saat" "tel durum" "ul ref"; gap: 6px 10px; padding: 10px 14px; border-bottom: 1px solid var(--cizgi); }
-  .db-gt tr[data-kisi] td { display: block; padding: 0; border: 0; overflow: visible; background: none !important; }
-  .db-gt td.db-kisi-td { grid-area: kisi; max-width: none; min-width: 0; overflow: hidden; }
-  .db-gt td.db-saat-td { grid-area: saat; text-align: right; }
-  .db-gt td.db-tel-td { grid-area: tel; }
-  .db-gt td.db-durum-td { grid-area: durum; }
-  .db-gt td.db-durum-td .db-rozetler { justify-content: flex-end; }
-  .db-gt td.db-ul-td { grid-area: ul; }
-  .db-gt td.db-kes { grid-area: ref; text-align: right; align-self: center; font-size: 12.5px; }
-  .db-gt tr.db-grup, .db-gt tr.db-grup td { display: block; }
-  .db-gt tr.db-gec-satir td:first-child { box-shadow: none; }
-  .db-gt tr.db-gec-satir { box-shadow: inset 3px 0 0 var(--turuncu); }
+@media (max-width: 560px) {
+  .db-mini-kap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .db-lg { grid-template-columns: 22px minmax(0, 1fr) 40px 40px 42px 40px 0; gap: 8px; padding: 0 12px; }
+  .db-lg > :last-child { display: none; }
 }`;
   document.head.appendChild(st);
 }
 
 // ---------------------------------------------------------------- iskelet (bir kez)
 function iskeletHtml() {
-  const secim = store.ayarlar.secim || {};
-  let tarih = '';
-  if (secim.tarih) { const d = new Date(`${secim.tarih}T12:00:00`); if (!isNaN(d)) tarih = d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' }); }
-  const z = store.ayarlar.zaman || {};
   return `
   <div class="db">
-    <div class="sayfa-baslik">
-      <div>
-        <h1>Dashboard</h1>
-        <div class="alt">${esc([tarih, secim.yer || 'Fuar İzmir, Gaziemir', z.bas && z.bit ? `oy verme ${z.bas}-${z.bit}` : ''].filter(Boolean).join(' · '))}</div>
-      </div>
-      <div class="sag" style="align-items:center;gap:14px">
-        <span class="db-canli" data-canli>Canlı</span>
-        <button class="btn btn-kucuk" data-tam title="Ekranı tam ekrana al (TV / projeksiyon)">⛶ Tam ekran</button>
-      </div>
+    <div class="db-kol">
+      <section class="db-kart db-hero" data-b="hero"></section>
+      <section class="db-kart db-saatlik">
+        <div class="db-sat-ust">
+          <div class="db-baslik">Saatlik geliş</div>
+          <div class="db-lej"><i class="g"></i>Gerçekleşen</div>
+          <div class="db-lej"><i class="b"></i>Beklenen</div>
+        </div>
+        <div class="db-sutunlar" data-b="saatlik"></div>
+      </section>
     </div>
 
-    <section class="kart db-kahraman" data-b="kahraman"></section>
-
-    <div class="db-izgara">
-      <section class="kart db-s8">
-        <div class="kart-baslik">Saatlik geliş <span class="alt">kümülatif oy kullanan</span>
-          <div class="sag db-lejant">
-            <span><i class="biz"></i>Bizde oy kullanan</span>
-            <span><i class="top"></i>Toplam oy kullanan</span>
-            <span><i class="tem"></i>Hedef temposu</span>
-          </div>
-        </div>
-        <div class="db-grafik" data-grafik>
-          <div data-svg></div>
-          <div class="db-ipucu" data-ipucu hidden></div>
-        </div>
-        <div class="db-saatler" data-b="saatler" aria-label="Saat saat bizde oy kullanan"></div>
+    <div class="db-kol">
+      <section class="db-kart db-lider">
+        <div class="db-baslik">Referans liderlik tablosu</div>
+        <div class="db-lg bas"><div>#</div><div>REFERANS</div><div>HEDEF</div><div>GELEN</div><div>%</div><div>KALAN</div><div></div></div>
+        <div class="kaydir" data-kaydir="lider"><div data-b="lider"></div></div>
       </section>
-
-      <section class="kart db-s4 db-lider">
-        <div class="kart-baslik">Referans liderlik <span class="alt">bizdeki hedefe göre</span><div class="sag db-zayif" data-b="lider-say"></div></div>
-        <div class="db-kaydir" data-kaydir="lider"><div data-b="lider"></div></div>
+      <section class="db-kart db-ilce">
+        <div class="db-ust"><div class="db-baslik">İlçe dağılımı</div><div class="db-not">gelen / bizim liste</div></div>
+        <div class="kaydir" data-kaydir="ilce"><div data-b="ilce" style="display:contents"></div></div>
       </section>
-
-      <section class="kart db-s8 db-gelmedi">
-        <div class="kart-baslik">
-          <span class="db-baslik-buyuk">Kesin bizde ama henüz gelmedi</span> <span class="rozet-sayi" data-b="gelmedi-say">0</span>
-          <div class="sag db-kontrol">
-            <div class="cipler" data-b="gelmedi-cip"></div>
-            <select class="girdi" data-ulasim-f title="Ulaşım türü">
-              <option value="hepsi">Tüm ulaşım</option><option value="kendi">Kendi gelecek</option><option value="servis">Servis</option><option value="yok">Ulaşımı belirsiz</option>
-            </select>
-            <button type="button" class="db-grup-dugme" data-grup><span class="anahtar ${tercih.grup ? 'acik' : ''}"></span>Referansa göre</button>
-          </div>
-        </div>
-        <div class="db-kaydir" data-kaydir="gelmedi"><div data-b="gelmedi"></div></div>
+      <section class="db-kart db-arac">
+        <div class="db-ust"><div class="db-baslik">Araç kullanımı</div><div class="db-not">sefer · taşınan kişi</div></div>
+        <div class="kaydir" data-kaydir="arac"><div data-b="arac" style="display:contents"></div></div>
+        <div class="db-bosta" data-b="bosta"></div>
       </section>
+    </div>
 
-      <div class="db-s4 db-yan">
-        <section class="kart db-yan-ust">
-          <div class="kart-baslik">Geciken alımlar <span class="alt">servis saati geçti, yola çıkmadı</span><div class="sag" data-b="geciken-say"></div></div>
-          <div class="db-kaydir" data-kaydir="geciken"><div data-b="geciken"></div></div>
-        </section>
-        <section class="kart db-yan-alt">
-          <div class="kart-baslik">Evrak uyarılı, gelmeyenler<div class="sag" data-b="evrak-say"></div></div>
-          <div class="db-kaydir" data-kaydir="evrak"><div data-b="evrak"></div></div>
-        </section>
-      </div>
-
-      <section class="kart db-s8">
-        <div class="kart-baslik">İlçe dağılımı <span class="alt">kesin bizde: hedef ve gelen</span>
-          <div class="sag db-cs-lejant"><span><i style="background:var(--kirmizi-acik)"></i>Hedef</span><span><i style="background:var(--kirmizi)"></i>Gelen</span></div>
-        </div>
-        <div class="kart-govde" data-b="ilce"></div>
+    <div class="db-kol">
+      <section class="db-kart db-ulasim" data-b="ulasim"></section>
+      <section class="db-kart db-liste">
+        <div class="db-l-ust" data-b="gelmedi-ust"></div>
+        <div class="db-l-cip" data-b="gelmedi-cip"></div>
+        <div class="kaydir" data-kaydir="gelmedi"><div data-b="gelmedi"></div></div>
       </section>
-
-      <section class="kart db-s4">
-        <div class="kart-baslik">Ulaşım türü <span class="alt">kesin bizde</span></div>
-        <div class="kart-govde" data-b="ulasim"></div>
+      <section class="db-kart db-liste">
+        <div class="db-l-ust" data-b="geciken-ust"></div>
+        <div class="kaydir" data-kaydir="geciken"><div data-b="geciken"></div></div>
+      </section>
+      <section class="db-kart db-liste">
+        <div class="db-l-ust" data-b="evrak-ust"></div>
+        <div class="kaydir" data-kaydir="evrak"><div data-b="evrak"></div></div>
       </section>
     </div>
   </div>`;
 }
 
 // ---------------------------------------------------------------- bölümler
-function kahramanHtml(m) {
+function heroHtml(m) {
   const s = m.s, yz = fmt.yuzde(s.oy_bizde, m.hedef);
-  const basladi = m.simdiD >= m.bas, bitti = m.simdiD > m.bit;
-  let tempo;
-  if (!basladi) tempo = `<span class="db-fark notr">Oy verme henüz başlamadı</span><span>Başlangıç <b>${esc(saatYaz(m.bas))}</b> · bitiş <b>${esc(saatYaz(m.bit))}</b></span>`;
-  else {
-    const fark = s.oy_bizde - m.beklenen;
-    const cip = fark > 0 ? `<span class="db-fark iyi">▲ ${fmt.sayi(fark)} önde</span>` : fark < 0 ? `<span class="db-fark kotu">▼ ${fmt.sayi(-fark)} geride</span>` : `<span class="db-fark notr">Tam tempoda</span>`;
-    tempo = `${cip}<span>${bitti ? 'Oy verme süresi bitti' : `Bu saatte hedef temposu <b>${fmt.sayi(m.beklenen)}</b>`}</span>`;
-  }
-  const tempoIsaret = basladi && !bitti && m.hedef ? `<b style="left:${Math.min(100, (m.beklenen / m.hedef) * 100)}%" title="Hedef temposu: ${m.beklenen}"></b>` : '';
-  const kutu = (etiket, deger, alt, sinif = '') => `<div class="db-kutu ${sinif}"><div class="e" title="${esc(etiket)}">${esc(etiket)}</div><div class="d">${deger}</div><div class="a" title="${esc(alt)}">${esc(alt)}</div></div>`;
-  const disaridan = s.oy_kullandi - s.oy_bizde;
+  const doldu = m.hedef ? Math.min(100, (s.oy_bizde / m.hedef) * 100) : 0;
+  const disari = s.oy_kullandi - s.oy_bizde;
+  const not = `${m.elle ? 'hedef = elle girildi' : 'hedef = kesin bizde'}${disari > 0 ? ` · bizde dışı ${fmt.sayi(disari)} oy` : ''}`;
+  // saatte kaç oy gerekiyor: kalan süre, oy vermenin başlamasından önce baştan sayılır
+  const kalanSaat = Math.max(1, (m.bit - Math.max(m.simdiD, m.bas)) / 60);
+  const gerek = m.simdiD >= m.bit ? 'Oy verme süresi bitti' : !s.kalan ? 'Hedef tamam' : `Saatte <b>${fmt.sayi(Math.ceil(s.kalan / kalanSaat))}</b> oy gerekiyor`;
+  const tamAcik = !!document.fullscreenElement;
+  const tam = document.fullscreenEnabled ? `<button type="button" class="db-tam-dugme" data-tam title="${tamAcik ? 'Tam ekrandan çık (Esc)' : 'Tam ekran (TV / projeksiyon)'}" aria-label="Tam ekran">${tamAcik ? '✕' : '⛶'}</button>` : '';
+  const mini = (etiket, deger, renk, uyari) => `<div class="db-mini"><div class="e"><i style="background:${renk}"></i>${etiket}</div><div class="d ${uyari ? 'uyari' : ''}">${fmt.sayi(deger)}</div></div>`;
   return `
-    <div>
-      <div class="db-etiket">Bizde oy kullanan${m.elle ? ' <span class="rozet u-kendi" title="Hedef yönetim ekranından elle girildi">elle hedef</span>' : ''}</div>
-      <div class="db-dev"><span class="db-dev-sayi">${fmt.sayi(s.oy_bizde)}</span><span class="db-dev-hedef">/ ${fmt.sayi(m.hedef)}</span><span class="db-dev-yuzde">%${yz}</span></div>
-      <div class="db-kc" role="progressbar" aria-valuemin="0" aria-valuemax="${m.hedef}" aria-valuenow="${s.oy_bizde}"><i style="width:${Math.min(100, yz)}%"></i>${tempoIsaret}</div>
-      <div class="db-tempo">${tempo}</div>
-    </div>
-    <div class="db-kutular">
-      ${kutu('Toplam oy kullanan', fmt.sayi(s.oy_kullandi), disaridan > 0 ? `${fmt.sayi(disaridan)} kişi bizde dışı` : 'tüm sınıflar')}
-      ${kutu('Kendi gelen', fmt.sayi(s.kendi_geldi), `bizde ${fmt.sayi(m.bizKendi)}`)}
-      ${kutu('Kalan', fmt.sayi(s.kalan), s.kalan ? 'hedefe ulaşmak için' : 'hedef tamam', s.kalan ? '' : 'iyi')}
-      ${kutu('Son 30 dakika', `+${fmt.sayi(m.son30)}`, 'bizde oy kullanan')}
-      ${kutu('Fuarda, oy vermedi', fmt.sayi(m.bizFuarda), `bizde · yolda ${fmt.sayi(m.bizYolda)}`)}
-      ${kutu('Geciken alım', fmt.sayi(m.geciken.length), m.geciken.length ? 'servis saati geçti' : 'gecikme yok', m.geciken.length ? 'uyari' : '')}
+    <div class="db-h-ust"><div class="db-baslik">OY KULLANDI</div><div class="db-not">${esc(not)}</div>${tam}</div>
+    <div class="db-dev"><span class="db-dev-sayi">${fmt.sayi(s.oy_bizde)}</span><span class="db-dev-hedef">/ ${fmt.sayi(m.hedef)}</span></div>
+    <div class="db-hbar" role="progressbar" aria-valuemin="0" aria-valuemax="${m.hedef}" aria-valuenow="${s.oy_bizde}"><i style="width:${doldu}%"></i><b style="left:25%"></b><b style="left:50%"></b><b style="left:75%"></b></div>
+    <div class="db-hsatir"><div class="k"><b>%${yz}</b> hedefte</div><div class="k2">Kalan <b>${fmt.sayi(s.kalan)}</b></div><div class="sag">${gerek}</div></div>
+    <div class="db-mini-kap">
+      ${mini('FUARDA', s.fuarda, 'var(--violet)')}${mini('YOLDA', s.yolda, 'var(--amber)')}${mini('ARANDI', s.arandi, 'var(--blue)')}${mini('GECİKEN', s.geciken, 'var(--amber)', true)}
     </div>`;
 }
 
-function saatlerHtml(m) {
-  const o = olcek; if (!o) return '';
-  const ilkSaat = Math.floor(o.x0 / 60), sonSaat = Math.ceil(o.x1 / 60) - 1;
-  const kova = new Map(), kovaTop = new Map(); let once = 0, onceTop = 0;
-  for (const d of m.bizDk) { if (d < o.x0) once++; else { const h = Math.min(sonSaat, Math.floor(d / 60)); kova.set(h, (kova.get(h) || 0) + 1); } }
-  for (const d of m.topDk) { if (d < o.x0) onceTop++; else { const h = Math.min(sonSaat, Math.floor(d / 60)); kovaTop.set(h, (kovaTop.get(h) || 0) + 1); } }
-  const simdiSaat = Math.floor(m.simdiD / 60);
-  const hucre = (etiket, n, t, sinif) => `<div class="db-saat ${sinif}" title="${esc(etiket)}: bizde ${n}, toplam ${t}"><div class="s">${esc(etiket)}</div><div class="n">${n ? '+' + fmt.sayi(n) : '0'}</div><div class="t">toplam ${fmt.sayi(t)}</div></div>`;
-  let h = once || onceTop ? hucre('Önce', once, onceTop, '') : '';
-  for (let s = ilkSaat; s <= sonSaat; s++) h += hucre(`${iki(s)}:00`, kova.get(s) || 0, kovaTop.get(s) || 0, s === simdiSaat ? 'simdi' : s > simdiSaat ? 'gelecek' : '');
-  return h;
+function saatlikHtml(m) {
+  const enCok = Math.max(1, ...m.saatler.map(x => Math.max(x.gercek, x.beklenen)));
+  const simdiH = Math.floor(m.simdiD / 60);
+  return m.saatler.map(x => {
+    const gecti = x.h <= simdiH, su = x.h === simdiH;
+    return `<div class="db-sutun" title="${iki(x.h)}:00 · gerçekleşen ${x.gercek} · beklenen ${x.beklenen}">
+      <div class="n">${gecti ? fmt.sayi(x.gercek) : ''}</div>
+      <div class="iz"><div class="bek" style="height:${(x.beklenen / enCok) * 100}%"></div><div class="ger${su ? ' simdi' : ''}" style="height:${gecti ? (x.gercek / enCok) * 100 : 0}%"></div></div>
+      <div class="s${su ? ' simdi' : ''}">${iki(x.h)}:00</div>
+    </div>`;
+  }).join('');
 }
 
 function liderHtml(m) {
-  if (!m.referanslar.length) return `<div class="bos">Kesin bizde listesinde referans yok</div>`;
-  const satirlar = m.referanslar.map((x, i) => {
-    const yz = Math.round(x.yuzde * 100), tamam = x.hedef > 0 && x.kalan === 0;
-    return `<tr ${x.ref ? `data-ref="${esc(x.ref)}" tabindex="0" title="${esc(refAd(x.ref))}: kişileri aç"` : ''} class="${tamam ? 'tamam' : ''}">
-      <td class="sira">${i + 1}</td>
-      <td class="ref">${esc(x.ref ? refAd(x.ref) : 'Referans yok')}${x.diger ? `<small>+${x.diger} bizde dışı oy</small>` : ''}</td>
-      <td class="num">${fmt.sayi(x.hedef)}</td>
-      <td class="num">${fmt.sayi(x.gelen)}</td>
-      <td class="num yuzde">%${yz}</td>
-      <td class="num">${tamam ? '✓' : fmt.sayi(x.kalan)}</td>
-      <td><div class="db-mini ${tamam ? 'tamam' : ''}"><i style="width:${yz}%"></i></div></td>
-    </tr>`;
-  }).join('');
-  return `<table class="tablo db-tablo"><thead><tr><th>#</th><th>Referans</th><th class="num">Hedef</th><th class="num">Gelen</th><th class="num">%</th><th class="num">Kalan</th><th></th></tr></thead><tbody>${satirlar}</tbody></table>`;
-}
-
-function gelmediFiltreli(m) {
-  const ulf = tercih.ulasim || 'hepsi';
-  const ulasimli = ulf === 'hepsi' ? m.gelmedi : m.gelmedi.filter(f => ulasim(f) === ulf);
-  const sayilar = { hepsi: ulasimli.length }; for (const f of ulasimli) sayilar[f.durum] = (sayilar[f.durum] || 0) + 1;
-  const liste = tercih.durum === 'hepsi' ? ulasimli : ulasimli.filter(f => f.durum === tercih.durum);
-  // öncelik: geciken alım > bekliyor > arandı > yolda > fuarda > alım saati > ad (anahtarlar bir kez hesaplanır)
-  const dk = m.simdiD;
-  const sirali = liste.map(f => ({ f, g: gecikme(f, dk), d: DURUM_SIRA[f.durum] ?? 9, s: f.tasima_saati ? dakika(f.tasima_saati) : 9999, a: f.yetkili || f.unvan || '' }))
-    .sort((x, y) => (y.g - x.g) || (x.d - y.d) || (x.s - y.s) || kolator.compare(x.a, y.a))
-    .map(x => x.f);
-  return { liste: sirali, sayilar };
-}
-// Satır: gecikme, alım saatinin altında turuncu "+N dk" olarak durur (Durum sütunu dar kalsın, tablo yana taşmasın)
-function gelmediSatir(f, refSutun, dk) {
-  const tel = telSec(f), a = aracOf(f), g = gecikme(f, dk);
-  const uyari = [
-    f.evrak_uyari ? `<span class="rozet u-evrak" title="${esc(f.evrak_uyari)}">Evrak</span>` : '',
-    f.kisi_oy_sayisi > 1 ? `<span class="rozet u-2oy" title="Aynı kişi ${f.kisi_oy_sayisi} firmayla oy kullanıyor">${f.kisi_oy_sayisi} OY</span>` : '',
-  ].join('');
-  return `<tr data-kisi="${f.id}" tabindex="0"${g ? ' class="db-gec-satir"' : ''}>
-    <td class="db-kisi-td"><div class="db-ad">${esc(kisiAd(f))}</div><div class="db-firma" title="${esc(f.unvan || '')}">${esc(f.unvan || '')}</div></td>
-    ${refSutun ? `<td class="kalin db-kes" title="${esc(f.referans ? refAd(f.referans) : 'Referans yok')}">${esc(f.referans ? refAd(f.referans) : 'Referans yok')}</td>` : ''}
-    <td class="db-tel-td">${tel ? `<div class="db-tel-h"><span class="db-tel">${esc(fmt.tel(tel))}</span><a class="btn btn-kucuk" href="${fmt.telLink(tel)}" title="${esc(fmt.tel(tel))} numarasını ara">📞 Ara</a></div>` : '<span class="db-zayif">Telefon yok</span>'}</td>
-    <td class="db-ul-td"><div class="db-rozetler">${ulasimRozet(f)}${a ? ' ' + plakaHtml(a.plaka) : ''}</div></td>
-    <td class="num db-saat-td">${f.tasima_saati ? `<b>${esc(fmt.saatKisa(f.tasima_saati))}</b>` : ''}${g ? `<div class="db-gec-k" title="Alım saati ${g} dakika geçti">+${g} dk</div>` : ''}</td>
-    <td class="db-durum-td"><div class="db-rozetler">${rozetDurum(f)}${uyari}</div></td>
-  </tr>`;
-}
-function gelmediHtml(m, liste) {
-  if (!m.gelmedi.length) return m.s.bizde ? `<div class="db-bos-iyi">✓ Kesin bizde listesindeki herkes oy kullandı</div>` : `<div class="bos">Kesin bizde listesinde kimse yok</div>`;
-  if (!liste.length) return `<div class="bos">Bu filtrede kimse yok</div>`;
-  const bas = (ref) => `<thead><tr><th>Kişi</th>${ref ? '<th class="w-ref">Referans</th>' : ''}<th class="w-tel">Telefon</th><th class="w-ul">Ulaşım</th><th class="num w-saat">Saat</th><th class="w-durum">Durum</th></tr></thead>`;
-  const dk = m.simdiD;
-  if (!tercih.grup) return `<table class="tablo db-tablo db-gt">${bas(true)}<tbody>${liste.map(f => gelmediSatir(f, true, dk)).join('')}</tbody></table>`;
-  const gruplar = new Map();
-  for (const f of liste) { const k = f.referans || ''; if (!gruplar.has(k)) gruplar.set(k, []); gruplar.get(k).push(f); }
-  const refBilgi = new Map(m.referanslar.map(x => [x.ref, x]));
-  const sirali = [...gruplar.entries()].sort((a, b) => b[1].length - a[1].length || (!a[0] - !b[0]) || kolator.compare(a[0], b[0]));
-  const govde = sirali.map(([k, fl]) => {
-    const x = refBilgi.get(k);
-    return `<tr class="db-grup" data-ref="${esc(k)}" ${k ? `tabindex="0" title="${esc(refAd(k))}: kişileri aç"` : ''}><td colspan="5">${esc(k ? refAd(k) : 'Referans yok')}<small>${fl.length} kişi gelmedi${x ? ` · gelen ${x.gelen} / ${x.hedef}` : ''}</small></td></tr>${fl.map(f => gelmediSatir(f, false, dk)).join('')}`;
-  }).join('');
-  return `<table class="tablo db-tablo db-gt">${bas(false)}<tbody>${govde}</tbody></table>`;
-}
-function gelmediCipHtml(sayilar) {
-  return FILTRE_DURUM.map(([k, ad]) => `<button type="button" class="cip ${tercih.durum === k ? 'aktif' : ''}" data-dfiltre="${k}">${esc(ad)} <span class="say">${fmt.sayi(sayilar[k] || 0)}</span></button>`).join('');
-}
-
-function gecikenHtml(m) {
-  if (!m.geciken.length) return `<div class="db-bos-iyi">✓ Geciken alım yok</div>`;
-  return m.geciken.map(({ f, dk }) => {
-    const a = aracOf(f), tel = telSec(f), soforTel = a?.sofor_tel && fmt.telLink(a.sofor_tel);
-    return `<div class="db-satir" data-kisi="${f.id}" tabindex="0">
-      <div class="db-satir-ana">
-        <div class="db-ad">${esc(kisiAd(f))}</div><div class="db-firma">${esc(f.unvan || '')}</div>
-        <div class="db-satir-alt">${a ? `${plakaHtml(a.plaka)} <span class="db-zayif">${esc(trBaslik(a.sofor_ad || ''))}</span>` : '<span class="rozet u-ulasimyok">Araç atanmadı</span>'}${f.rota_kod ? ` <span class="db-zayif">${esc(trBaslik(f.rota_kod))}</span>` : ''}</div>
-      </div>
-      <div class="db-satir-sag">
-        <div class="db-gec">+${dk} dk</div><div class="db-zayif">alım ${esc(fmt.saatKisa(f.tasima_saati))}</div>
-        <div style="display:flex;gap:4px">${soforTel ? `<a class="btn btn-kucuk" href="${soforTel}" title="Şoförü ara">Şoför</a>` : ''}${tel ? `<a class="btn btn-kucuk" href="${fmt.telLink(tel)}" title="Kişiyi ara">📞 Ara</a>` : ''}</div>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function evrakHtml(m) {
-  if (!m.evrak.length) return `<div class="db-bos-iyi">✓ Evrak uyarılı bekleyen yok</div>`;
-  return m.evrak.map(f => {
-    const tel = telSec(f);
-    return `<div class="db-satir" data-kisi="${f.id}" tabindex="0">
-      <div class="db-satir-ana">
-        <div class="db-ad">${esc(kisiAd(f))}</div><div class="db-firma">${esc(f.unvan || '')}</div>
-        <div class="db-evrak-yazi">${esc(f.evrak_uyari)}</div>
-      </div>
-      <div class="db-satir-sag">
-        <div class="db-rozetler" style="justify-content:flex-end">${f.oy_sinifi !== 'bizde' ? rozetSinif(f.oy_sinifi) : ''} ${rozetDurum(f)}</div>
-        ${f.referans ? `<div class="db-zayif">${esc(refAd(f.referans))}</div>` : ''}
-        ${tel ? `<a class="btn btn-kucuk" href="${fmt.telLink(tel)}">📞 Ara</a>` : ''}
-      </div>
+  if (!m.referanslar.length) return `<div class="db-yok">Kesin bizde listesinde referans yok</div>`;
+  return m.referanslar.map((x, i) => {
+    const yz = Math.round(x.yuzde * 100), ad = x.ref ? refAd(x.ref) : 'Referans yok';
+    return `<div class="db-lg satir" ${x.ref ? `data-ref="${esc(x.ref)}" tabindex="0" title="${esc(ad)}: kişileri aç"` : `title="${esc(ad)}"`}>
+      <div class="sr">${i + 1}</div><div class="ad">${esc(ad)}</div><div class="h">${fmt.sayi(x.hedef)}</div><div class="g">${fmt.sayi(x.gelen)}</div><div class="y">%${yz}</div><div class="k">${fmt.sayi(x.kalan)}</div>
+      <div class="br"><i class="${i < 3 ? 'ilk' : ''}" style="width:${yz}%"></i></div>
     </div>`;
   }).join('');
 }
 
 function ilceHtml(m) {
-  if (!m.ilceler.length) return `<div class="bos">Veri yok</div>`;
+  if (!m.ilceler.length) return `<div class="db-yok">Veri yok</div>`;
   const tepe = Math.max(1, ...m.ilceler.map(x => x.hedef));
-  return `<div class="db-cubuklar" style="grid-template-rows:repeat(${Math.ceil(m.ilceler.length / 2)}, auto)">${m.ilceler.map(x => `
-    <div class="db-cs" title="${esc(trBaslik(x.ilce) || 'İlçe yok')}: hedef ${x.hedef}, gelen ${x.gelen}">
-      <div class="ad">${esc(x.ilce ? trBaslik(x.ilce) : 'İlçe yok')}</div>
+  return m.ilceler.map(x => {
+    const ad = x.ilce ? trBaslik(x.ilce) : 'İlçe yok';
+    return `<div class="db-i" ${x.ilce ? `data-ilce="${esc(x.ilce)}" tabindex="0"` : ''} title="${esc(ad)}: gelen ${x.gelen}, bizim liste ${x.hedef}">
+      <div class="ad">${esc(ad)}</div>
       <div class="iz"><span style="width:${(x.hedef / tepe) * 100}%"></span><i style="width:${(x.gelen / tepe) * 100}%"></i></div>
-      <div class="sy">${fmt.sayi(x.gelen)} <small>/ ${fmt.sayi(x.hedef)} · %${fmt.yuzde(x.gelen, x.hedef)}</small></div>
-    </div>`).join('')}</div>`;
+      <div class="sy">${fmt.sayi(x.gelen)} <small>/ ${fmt.sayi(x.hedef)}</small></div>
+    </div>`;
+  }).join('');
+}
+
+function aracHtml(m) {
+  if (!m.kullanim.length) return `<div class="db-yok">Araca atanmış yolcu yok</div>`;
+  const tepe = Math.max(1, ...m.kullanim.map(x => x.tasinan + x.yolda));
+  return m.kullanim.map(x => {
+    const a = x.a, ad = [fmt.plaka(a.plaka), trBaslik(a.sofor_ad || '')].filter(Boolean).join(' · ');
+    return `<button type="button" class="db-av" data-arac="${a.id}" title="${esc(ad)}: ${x.atanan} yolcu atanmış, ${x.tasinan} taşındı${x.yolda ? `, ${x.yolda} şu an araçta` : ''}">
+      <span class="db-pl"><i></i><b>${esc(fmt.plaka(a.plaka))}</b></span>
+      <span class="br"><i class="${a.durum === 'arizali' ? 'ariza' : ''}" style="width:${((x.tasinan + x.yolda) / tepe) * 100}%"></i></span>
+      <span class="kisi">${fmt.sayi(x.tasinan)} kişi</span><span class="sef">${fmt.sayi(x.sefer)} sefer</span>
+    </button>`;
+  }).join('');
+}
+function bostaHtml(m) {
+  return `<span>Boşta bekleyen ${m.bosta.length}:</span>${m.bosta.map(a => `<button type="button" data-arac="${a.id}" title="Aracı aç">${esc(fmt.plaka(a.plaka))}${a.sofor_ad ? ` · ${esc(kisaAd(a.sofor_ad))}` : ''}</button>`).join('')}`;
 }
 
 function ulasimHtml(m) {
-  const satir = (k, not) => {
-    const u = m.ul[k], yz = fmt.yuzde(u.gelen, u.hedef);
-    return `<div>
-      <div class="db-ul-ust"><span class="db-ul-ad">${esc(ULASIM_AD[k])}</span><span class="db-ul-say">${fmt.sayi(u.gelen)} <small>/ ${fmt.sayi(u.hedef)}</small></span><span class="db-ul-yuzde">%${yz}</span></div>
-      <div class="cubuk ${u.hedef && u.gelen >= u.hedef ? 'yesil' : ''}"><i style="width:${yz}%"></i></div>
-      ${not ? `<div class="db-ul-not">${not}</div>` : ''}
-    </div>`;
-  };
-  const sv = m.ul.servis;
-  return `<div class="db-ul">
-    ${satir('kendi', `${fmt.sayi(m.ul.kendi.hedef - m.ul.kendi.gelen)} kişi henüz gelmedi`)}
-    ${satir('servis', `saati belli ${fmt.sayi(sv.saatli)} · araç atanmış ${fmt.sayi(sv.arac)}${sv.geciken ? ` · <b style="color:var(--turuncu)">${fmt.sayi(sv.geciken)} geciken</b>` : ''}`)}
-    ${satir('yok', m.ul.yok.hedef - m.ul.yok.gelen ? `${fmt.sayi(m.ul.yok.hedef - m.ul.yok.gelen)} kişinin nasıl geleceği belli değil` : '')}
+  const seg = ULASIM_TUR.map(([k, , renk]) => `<div style="flex:${m.ul[k]};background:${renk}"></div>`).join('');
+  const oge = ULASIM_TUR.map(([k, ad, renk]) => `<button type="button" class="db-ul-oge ${tercih.ulasim === k ? 'aktif' : ''}" data-ulf="${k}" title="${tercih.ulasim === k ? 'Filtreyi kaldır' : 'Gelmeyenler listesini bu ulaşıma göre süz'}"><span class="e"><i style="background:${renk}"></i>${esc(ad)}</span><span class="d">${fmt.sayi(m.ul[k])}</span></button>`).join('');
+  return `<div class="db-baslik" style="text-transform:none">ULAŞIM TÜRÜ · bizim liste</div><div class="db-ul-bar" aria-label="Ulaşım dağılımı">${seg}</div><div class="db-ul-uc">${oge}</div>`;
+}
+
+// Kesin bizde henüz gelmeyenler: ulaşım süzgeci önce, durum çipleri sonra
+function gelmediSuz(m) {
+  const ulf = tercih.ulasim;
+  const ulasimli = ulf === 'hepsi' ? m.gelmediHam : m.gelmediHam.filter(f => ulasim(f) === ulf);
+  const sayilar = { hepsi: ulasimli.length, yolda: 0, arandi: 0, bekliyor: 0 }; for (const f of ulasimli) sayilar[f.durum]++;
+  const liste = tercih.durum === 'hepsi' ? ulasimli : ulasimli.filter(f => f.durum === tercih.durum);
+  const dk = m.simdiD;
+  const sirali = liste.map(f => ({ f, d: GUN_SIRA[f.durum] ?? 0, g: gecikme(f, dk), s: f.tasima_saati ? dakika(f.tasima_saati) : 9999, a: f.yetkili || f.unvan || '' }))
+    .sort((x, y) => (y.d - x.d) || (y.g - x.g) || (x.s - y.s) || kolator.compare(x.a, y.a)).map(x => x.f);
+  return { liste: sirali, sayilar };
+}
+function araBtn(f) {
+  const tel = telSec(f);
+  return tel ? `<a class="db-ara" href="${fmt.telLink(tel)}" title="${esc(fmt.tel(tel))} numarasını ara">📞 Ara</a>` : `<span class="db-ara yok" title="Telefon yok">📞 Ara</span>`;
+}
+// Kişiyi referans YA DA başkası karşılar: karşılayan varsa adı ve saati, henüz yolda ve karşılanmadıysa yetkili kullanıcıya "Karşıladım" düğmesi
+function karsilamaMeta(f) {
+  return f.karsilayan ? ` · <span class="kars">Karşılayan: ${esc(trBaslik(f.karsilayan))}${f.karsilama_zamani ? ` · ${esc(fmt.saat(f.karsilama_zamani))}` : ''}</span>` : '';
+}
+function karsilaBtn(f) {
+  if (f.karsilayan || f.durum !== 'yolda' || !isaretleyebilirMi(f)) return '';
+  const ben = referansBenMi(f);
+  return `<button type="button" class="db-karsila" data-karsila="${f.id}" title="${ben ? 'Bu kişinin referansısın: karşıladım olarak işaretle' : 'Kişiyi sen karşıladıysan işaretle'}">Karşıladım</button>`;
+}
+function ogeHtml(f, meta, ekstra = '') {
+  const m = meta + karsilamaMeta(f);
+  return `<div class="db-oge">
+    <div class="ana"><button type="button" class="ad" data-kisi="${f.id}" title="${esc(f.unvan || '')}">${esc(kisiAd(f))}</button><div class="meta" title="${esc(String(m).replace(/<[^>]+>/g, ''))}">${m}</div></div>
+    ${ekstra}${karsilaBtn(f)}${araBtn(f)}
   </div>`;
 }
-
-// ---------------------------------------------------------------- SAATLİK GELİŞ GRAFİĞİ (inline SVG)
-function grafikCiz() {
-  const kap = kok?.querySelector('[data-grafik]'), yer = kok?.querySelector('[data-svg]');
-  if (!kap || !yer || !model) return;
-  const m = model;
-  const W = Math.max(300, Math.round(kap.clientWidth - 12 || 900)), H = W < 560 ? 280 : GRAFIK_H;
-  sonGenislik = kap.clientWidth;
-
-  // x ekseni: oy verme saatleri; bugünkü işaretler ve şimdi 3 saate kadar dışarıdaysa eksen genişler
-  let x0 = m.bas, x1 = m.bit;
-  const icerde = d => d >= m.bas - 180 && d <= m.bit + 180;
-  for (const d of [...m.topDk.filter(icerde), ...(icerde(m.simdiD) ? [m.simdiD] : [])]) {
-    if (d < x0) x0 = Math.floor(d / 60) * 60;
-    if (d > x1) x1 = Math.ceil(d / 60) * 60;
-  }
-  const kis = d => Math.max(x0, Math.min(x1, d));
-  const bizDk = m.bizDk.map(kis), topDk = m.topDk.map(kis);
-  const canli = m.simdiD >= x0;
-  const son = kis(m.simdiD);
-
-  const tepe = Math.max(m.hedef, topDk.length, 10);
-  const adim = guzelAdim(tepe);
-  const yMax = Math.ceil((tepe * 1.06) / adim) * adim;
-  const pl = PAD.l, pr = W - PAD.r, pt = PAD.t, pb = H - PAD.b;
-  const X = d => r1(pl + ((d - x0) / (x1 - x0)) * (pr - pl));
-  const Y = v => r1(pt + (1 - v / yMax) * (pb - pt));
-  const tempo = d => m.hedef * Math.max(0, Math.min(1, (d - m.bas) / (m.bit - m.bas)));
-
-  let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" tabindex="0" role="img" aria-label="Saatlik geliş grafiği: bizde ${bizDk.length} oy, toplam ${topDk.length} oy, hedef ${m.hedef}. Oklarla saat saat gezilebilir." data-svg-kok>`;
-  // yatay ızgara + y etiketleri
-  for (let v = 0; v <= yMax; v += adim) {
-    s += `<line class="${v === 0 ? 'db-g-eksen' : 'db-g-izgara'}" x1="${pl}" x2="${pr}" y1="${Y(v)}" y2="${Y(v)}"/>`;
-    s += `<text class="db-g-yazi" x="${pl - 10}" y="${Y(v) + 4}" text-anchor="end">${fmt.sayi(v)}</text>`;
-  }
-  // x etiketleri (saat başları)
-  // saat etiketleri en az ~58 px arayla: dar ekranda 2 saatte bir
-  const saatAdim = ((pr - pl) / Math.max(1, (x1 - x0) / 60)) < 58 || x1 - x0 > 12 * 60 ? 120 : 60;
-  for (let d = Math.ceil(x0 / 60) * 60; d <= x1; d += saatAdim) {
-    s += `<line class="db-g-eksen" x1="${X(d)}" x2="${X(d)}" y1="${pb}" y2="${pb + 5}"/>`;
-    s += `<text class="db-g-yazi" x="${X(d)}" y="${pb + 21}" text-anchor="middle">${saatYaz(d)}</text>`;
-  }
-  // hedef çizgisi
-  if (m.hedef > 0) {
-    s += `<line class="db-g-eksen" x1="${pl}" x2="${pr}" y1="${Y(m.hedef)}" y2="${Y(m.hedef)}"/>`;
-    s += `<text class="db-g-hedef-yazi" x="${pl + 8}" y="${Y(m.hedef) - 7}">HEDEF ${fmt.sayi(m.hedef)}</text>`;
-    // beklenen doğrusal tempo: başlangıçta 0, bitişte hedef
-    s += `<path class="db-g-tempo" d="M${X(x0)},${Y(0)}H${X(m.bas)}L${X(m.bit)},${Y(m.hedef)}H${X(x1)}"/>`;
-  }
-  // gerçekleşen (basamaklı kümülatif)
-  const basamak = dizi => {
-    let c = kacTane(dizi, x0), d = `M${X(x0)},${Y(c)}`;
-    for (let i = c; i < dizi.length && dizi[i] <= son; i++) { c++; d += `H${X(dizi[i])}V${Y(c)}`; }
-    return { d: d + `H${X(son)}`, c };
-  };
-  let bizSon = 0, topSon = 0;
-  if (canli) {
-    const top = basamak(topDk), biz = basamak(bizDk); bizSon = biz.c; topSon = top.c;
-    s += `<path class="db-g-alan" d="${biz.d}V${Y(0)}H${X(x0)}Z"/>`;
-    s += `<path class="db-g-top" d="${top.d}"/>`;
-    s += `<path class="db-g-biz" d="${biz.d}"/>`;
-  }
-  // şimdi çizgisi + tempo halkası
-  const simdiIcerde = m.simdiD >= x0 && m.simdiD <= x1;
-  if (simdiIcerde) {
-    const xs = X(m.simdiD), etiket = `ŞİMDİ ${saatYaz(m.simdiD)}`, gen = 84;
-    const hx = Math.max(pl, Math.min(W - gen - 2, xs - gen / 2));
-    s += `<line class="db-g-simdi" x1="${xs}" x2="${xs}" y1="${pt - 8}" y2="${pb}"/>`;
-    s += `<rect class="db-g-hap" x="${hx}" y="${pt - 28}" width="${gen}" height="20" rx="10"/><text class="db-g-hap-yazi" x="${hx + gen / 2}" y="${pt - 14}" text-anchor="middle">${etiket}</text>`;
-  }
-  if (canli) {
-    const xe = X(son), yb = Y(bizSon), yt = Y(topSon);
-    const bek = Math.round(tempo(son)), yk = Y(bek);
-    if (m.hedef > 0 && simdiIcerde && m.simdiD >= m.bas) {
-      s += `<circle class="db-g-n-tem" cx="${xe}" cy="${yk}" r="4.5"/>`;
-      if (Math.abs(yk - yb) >= 20 && (topSon === bizSon || Math.abs(yk - yt) >= 20)) s += `<text class="db-g-deger-alt" x="${xe + 12}" y="${yk + 4}">tempo ${fmt.sayi(bek)}</text>`;
-    }
-    if (topSon !== bizSon) s += `<circle class="db-g-n-top" cx="${xe}" cy="${yt}" r="5"/>`;
-    s += `<circle class="db-g-n-biz" cx="${xe}" cy="${yb}" r="6"/>`;
-    s += `<text class="db-g-deger" x="${xe + 12}" y="${bizSon ? yb + 6 : yb - 9}">${fmt.sayi(bizSon)}<tspan class="db-g-deger-alt" dx="5">bizde</tspan></text>`;
-    if (topSon !== bizSon && Math.abs(yt - yb) >= 18) s += `<text class="db-g-deger" x="${xe + 12}" y="${yt + 6}" style="font-size:14px">${fmt.sayi(topSon)}<tspan class="db-g-deger-alt" dx="5">toplam</tspan></text>`;
-  } else {
-    const pg = Math.min(350, W - 16), cx = W < 560 ? W / 2 : (pl + pr) / 2;
-    s += `<rect class="db-g-perde" x="${cx - pg / 2}" y="${(pt + pb) / 2 - 32}" width="${pg}" height="60" rx="12"/>`;
-    s += `<text class="db-g-bilgi" x="${cx}" y="${(pt + pb) / 2 - 6}" text-anchor="middle">Oy verme henüz başlamadı</text>`;
-    s += `<text class="db-g-yazi" x="${cx}" y="${(pt + pb) / 2 + 16}" text-anchor="middle">${saatYaz(m.bas)} ile ${saatYaz(m.bit)} arası · şimdi ${saatYaz(m.simdiD)}</text>`;
-  }
-  // imleç (hover / klavye)
-  s += `<g data-imlec visibility="hidden"><line class="db-g-imlec" y1="${pt}" y2="${pb}"/><circle data-n="tem" class="db-g-n-tem" r="4"/><circle data-n="top" class="db-g-n-top" r="5"/><circle data-n="biz" class="db-g-n-biz" r="5.5"/></g>`;
-  s += `</svg>`;
-  if (onbellek.get('svg') !== s) { onbellek.set('svg', s); yer.innerHTML = s; }
-  olcek = { W, x0, x1, pl, pr, X, Y, son, canli, bizDk, topDk, tempo, hedef: m.hedef, bas: m.bas };
-  bolum('saatler', saatlerHtml(m));
-  if (fare != null) imlecCiz(fare); else imlecCiz(null);
+function ustHtml(baslik, renk, n) {
+  return `<div class="db-baslik" style="color:${renk}">${baslik}</div><div class="n">${fmt.sayi(n)}</div>`;
 }
-
-function imlecCiz(dk) {
-  const o = olcek, g = kok?.querySelector('[data-imlec]'), ip = kok?.querySelector('[data-ipucu]');
-  if (!o || !g || !ip) return;
-  if (dk == null) { g.setAttribute('visibility', 'hidden'); ip.hidden = true; return; }
-  dk = Math.round(Math.max(o.x0, Math.min(o.x1, dk)));
-  const x = o.X(dk), gecmis = o.canli && dk <= o.son + 0.5;
-  const biz = kacTane(o.bizDk, dk), top = kacTane(o.topDk, dk), bek = Math.round(o.tempo(dk));
-  g.setAttribute('visibility', 'visible');
-  const ln = g.querySelector('line'); ln.setAttribute('x1', x); ln.setAttribute('x2', x);
-  const nokta = (ad, v, gorun) => { const c = g.querySelector(`[data-n="${ad}"]`); c.setAttribute('cx', x); c.setAttribute('cy', o.Y(v)); c.setAttribute('visibility', gorun ? 'visible' : 'hidden'); };
-  nokta('tem', bek, o.hedef > 0); nokta('top', top, gecmis && top !== biz); nokta('biz', biz, gecmis);
-  const satir = (renk, deger, etiket, stil = '') => `<div class="r"><i style="border-color:${renk};${stil}"></i><b>${deger}</b><span>${etiket}</span></div>`;
-  ip.innerHTML = `<div class="s">SAAT ${saatYaz(dk)}</div>`
-    + (gecmis ? satir('var(--db-biz)', fmt.sayi(biz), 'bizde oy kullanan') + satir('var(--db-top)', fmt.sayi(top), 'toplam oy kullanan') : `<div class="db-zayif" style="margin-bottom:3px">Bu saat henüz gelmedi</div>`)
-    + (o.hedef > 0 ? satir('var(--db-biz)', fmt.sayi(bek), 'hedef temposu', 'border-top-style:dashed;opacity:.6') : '')
-    + (gecmis && o.hedef > 0 ? `<div class="db-zayif" style="margin-top:5px">${biz - bek >= 0 ? `tempodan ${biz - bek} önde` : `tempodan ${bek - biz} geride`}</div>` : '');
-  ip.hidden = false;
-  const svg = kok.querySelector('[data-svg-kok]'); const olc = svg.getBoundingClientRect().width / o.W || 1;
-  const px = x * olc + 4, gen = ip.offsetWidth || 200, kapGen = kok.querySelector('[data-grafik]').clientWidth;
-  ip.style.left = `${px + 16 + gen > kapGen ? px - gen - 16 : px + 16}px`;
+function gelmediCipHtml(sayilar) {
+  const cipler = FILTRE_DURUM.map(([k, ad]) => `<button type="button" class="db-cip ${tercih.durum === k ? 'aktif' : ''}" data-dfiltre="${k}">${esc(ad)} <small>${fmt.sayi(sayilar[k] || 0)}</small></button>`);
+  if (tercih.ulasim !== 'hepsi') cipler.push(`<button type="button" class="db-cip aktif" data-ulf="hepsi" title="Ulaşım süzgecini kaldır">${esc(ULASIM_TUR.find(u => u[0] === tercih.ulasim)?.[1] || '')} ✕</button>`);
+  return cipler.join('');
 }
-
-function grafikOlaylari() {
-  const kap = kok.querySelector('[data-grafik]');
-  const dkBul = e => {
-    const svg = kap.querySelector('[data-svg-kok]'); if (!svg || !olcek) return null;
-    const rc = svg.getBoundingClientRect(); const px = (e.clientX - rc.left) * (olcek.W / rc.width);
-    if (px < olcek.pl - 20 || px > olcek.pr + 40) return null;
-    return olcek.x0 + ((Math.max(olcek.pl, Math.min(olcek.pr, px)) - olcek.pl) / (olcek.pr - olcek.pl)) * (olcek.x1 - olcek.x0);
-  };
-  kap.addEventListener('pointermove', e => { fare = dkBul(e); imlecCiz(fare); });
-  kap.addEventListener('pointerleave', () => { fare = null; imlecCiz(null); });
-  kap.addEventListener('focusin', e => { if (e.target.matches('[data-svg-kok]') && olcek) { fare = olcek.canli ? olcek.son : olcek.x0; imlecCiz(fare); } });
-  kap.addEventListener('focusout', () => { fare = null; imlecCiz(null); });
-  kap.addEventListener('keydown', e => {
-    if (!olcek || fare == null || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
-    e.preventDefault();
-    const adim = e.shiftKey ? 60 : 10;
-    fare = e.key === 'Home' ? olcek.x0 : e.key === 'End' ? olcek.x1 : Math.max(olcek.x0, Math.min(olcek.x1, fare + (e.key === 'ArrowRight' ? adim : -adim)));
-    imlecCiz(fare);
-  });
-  if ('ResizeObserver' in window) {
-    ro = new ResizeObserver(() => { if (Math.abs(kap.clientWidth - sonGenislik) > 2) grafikCiz(); });
-    ro.observe(kap);
-  }
+function gelmediHtml(m, liste) {
+  if (!m.gelmediHam.length) return m.s.bizde ? `<div class="db-iyi">✓ Kesin bizde listesindeki herkes fuarda ya da oy kullandı</div>` : `<div class="db-yok">Kesin bizde listesinde kimse yok</div>`;
+  if (!liste.length) return `<div class="db-yok">Bu süzgeçte kimse yok</div>`;
+  return liste.map(f => ogeHtml(f, `${esc(DURUM_AD[f.durum] || f.durum)}${f.referans ? ` · Ref: ${esc(refAd(f.referans))}` : ''}${f.ilce ? ` · ${esc(trBaslik(f.ilce))}` : ''}`)).join('');
+}
+function gecikenHtml(m) {
+  if (!m.geciken.length) return `<div class="db-iyi">✓ Geciken alım yok</div>`;
+  return m.geciken.map(({ f, dk }) => {
+    const a = aracOf(f), soforTel = a?.sofor_tel && fmt.telLink(a.sofor_tel);
+    const meta = [f.tasima_saati ? esc(fmt.saatKisa(f.tasima_saati)) : '', esc(rotaAd(f)), esc(DURUM_AD[f.durum] || f.durum), `<em>+${dk} dk</em>`].filter(Boolean).join(' · ');
+    const sofor = soforTel ? `<a class="db-ara" href="${soforTel}" title="Şoförü ara: ${esc(trBaslik(a.sofor_ad || ''))}">Şoför</a>` : '';
+    return ogeHtml(f, meta, sofor);
+  }).join('');
+}
+function evrakHtml(m) {
+  if (!m.evrak.length) return `<div class="db-iyi">✓ Evrak uyarılı bekleyen yok</div>`;
+  return m.evrak.map(f => ogeHtml(f, esc(trBaslik(f.evrak_uyari || f.sicil_notu || '')))).join('');
 }
 
 // ---------------------------------------------------------------- güncelle (canlı)
@@ -744,86 +535,76 @@ function guncelle() {
   const kaydir = {}; kok.querySelectorAll('[data-kaydir]').forEach(e => { kaydir[e.dataset.kaydir] = e.scrollTop; });
   model = hesapla();
   const m = model;
-  bolum('kahraman', kahramanHtml(m));
-  grafikCiz();
+  kok.querySelector('.db')?.style.setProperty('--db-n', m.saatler.length);
+  bolum('hero', heroHtml(m));
+  bolum('saatlik', saatlikHtml(m));
   bolum('lider', liderHtml(m));
-  bolum('lider-say', `${m.referanslar.filter(x => x.ref).length} referans`);
-  const { liste, sayilar } = gelmediFiltreli(m);
-  bolum('gelmedi-say', fmt.sayi(m.gelmedi.length));
+  bolum('ilce', ilceHtml(m));
+  bolum('arac', aracHtml(m));
+  bolum('bosta', bostaHtml(m));
+  bolum('ulasim', ulasimHtml(m));
+  const { liste, sayilar } = gelmediSuz(m);
+  bolum('gelmedi-ust', ustHtml('KESİN BİZDE · HENÜZ GELMEDİ', 'var(--red)', liste.length));
   bolum('gelmedi-cip', gelmediCipHtml(sayilar));
   bolum('gelmedi', gelmediHtml(m, liste));
+  bolum('geciken-ust', ustHtml('◷ GECİKEN ALIMLAR', 'var(--amber-ink)', m.geciken.length));
   bolum('geciken', gecikenHtml(m));
-  bolum('geciken-say', m.geciken.length ? `<span class="rozet u-gecikti">${m.geciken.length}</span>` : '');
+  bolum('evrak-ust', ustHtml('▲ EVRAK UYARILI · GELMEDİ', 'var(--yellow-ink)', m.evrak.length));
   bolum('evrak', evrakHtml(m));
-  bolum('evrak-say', m.evrak.length ? `<span class="rozet u-evrak">${m.evrak.length}</span>` : '');
-  bolum('ilce', ilceHtml(m));
-  bolum('ulasim', ulasimHtml(m));
-  canliCiz();
   kok.querySelectorAll('[data-kaydir]').forEach(e => { if (kaydir[e.dataset.kaydir]) e.scrollTop = kaydir[e.dataset.kaydir]; });
-}
-
-// "Canlı" yazısı bağlantıyı dürüst gösterir: kopuksa 8 saat açık kalan ekran eski rakamı canlı sanmasın
-function canliCiz() {
-  const c = kok?.querySelector('[data-canli]'); if (!c) return;
-  const kopuk = !store.cevrimici || !store.canli, son = store.olaylar[0]?.zaman;
-  c.classList.toggle('kopuk', kopuk);
-  c.textContent = !store.cevrimici ? 'İnternet yok · rakamlar güncel olmayabilir'
-    : !store.canli ? 'Bağlanıyor…'
-    : son ? `Canlı · son hareket ${fmt.goreli(son)}` : 'Canlı · henüz hareket yok';
-}
-function tamEkranCiz() {
-  const b = kok?.querySelector('[data-tam]'); if (!b) return;
-  const acik = !!document.fullscreenElement;
-  b.textContent = acik ? '✕ Tam ekrandan çık' : '⛶ Tam ekran';
-  b.title = acik ? 'Tam ekrandan çık (Esc)' : 'Ekranı tam ekrana al (TV / projeksiyon)';
 }
 
 // ---------------------------------------------------------------- etkileşim (olay devri, bir kez)
 function tikla(e) {
-  if (e.target.closest('a[href]')) return;                         // Ara / Şoför düğmeleri kendi işini yapar, kartı açmaz
+  if (e.target.closest('a[href]')) return;                         // Ara / Şoför bağlantıları kendi işini yapar, kartı açmaz
   const tam = e.target.closest('[data-tam]');
   if (tam) { (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())?.catch?.(() => {}); return; }
+  const ka = e.target.closest('[data-karsila]');
+  if (ka) {
+    const id = Number(ka.dataset.karsila); ka.disabled = true;
+    karsiladim(id).then(geriAl => toast('Karşılandı olarak işaretlendi', { tur: 'basari', geriAl })).catch(err => { ka.disabled = false; hataGoster(err); });
+    return;
+  }
   const df = e.target.closest('[data-dfiltre]');
   if (df) { tercih.durum = df.dataset.dfiltre; tercihKaydet(); guncelle(); return; }
-  const gr = e.target.closest('[data-grup]');
-  if (gr) { tercih.grup = !tercih.grup; tercihKaydet(); gr.querySelector('.anahtar')?.classList.toggle('acik', tercih.grup); guncelle(); return; }
+  const uf = e.target.closest('[data-ulf]');
+  if (uf) { const k = uf.dataset.ulf; tercih.ulasim = tercih.ulasim === k ? 'hepsi' : k; tercihKaydet(); guncelle(); return; }
   const k = e.target.closest('[data-kisi]');
   if (k) { kisiKartiAc(Number(k.dataset.kisi)); return; }
+  const ar = e.target.closest('[data-arac]');
+  if (ar) { location.hash = '#araclar/' + ar.dataset.arac; return; }
   const r = e.target.closest('[data-ref]');
-  if (r && r.dataset.ref) location.hash = '#kisiler/' + encodeURIComponent(r.dataset.ref);
+  if (r && r.dataset.ref) { location.hash = '#kisiler/' + encodeURIComponent(r.dataset.ref); return; }
+  const i = e.target.closest('[data-ilce]');
+  if (i && i.dataset.ilce) location.hash = '#kisiler/' + encodeURIComponent(i.dataset.ilce);
 }
 function tus(e) {
   if (e.key !== 'Enter' && e.key !== ' ') return;
-  const hedef = e.target.closest?.('[data-kisi], [data-ref]');
+  const hedef = e.target.closest?.('[data-ref], [data-ilce]');
   if (!hedef || hedef !== e.target) return;
   e.preventDefault(); tikla({ target: hedef });
 }
+function tamEkranDegisti() { onbellek.delete('hero'); guncelle(); }
 
 export default {
   async render(k) {
-    kok = k; fare = null; olcek = null; sonGenislik = 0; onbellek.clear();
+    kok = k; onbellek.clear();
     stilEkle();
+    kok.classList.add('db-tam');
     kok.innerHTML = iskeletHtml();
-    const sel = kok.querySelector('[data-ulasim-f]');
-    sel.value = ULASIM_AD[tercih.ulasim] ? tercih.ulasim : 'hepsi';
-    sel.addEventListener('change', () => { tercih.ulasim = sel.value; tercihKaydet(); guncelle(); });
     kok.addEventListener('click', tikla);
     kok.addEventListener('keydown', tus);
-    grafikOlaylari();
-    document.addEventListener('fullscreenchange', tamEkranCiz);
-    if (!document.fullscreenEnabled) kok.querySelector('[data-tam]')?.remove();
-    tamEkranCiz();
+    document.addEventListener('fullscreenchange', tamEkranDegisti);
     guncelle();
   },
   yenile(sebep) {
     if (!kok || YOKSAY.has(sebep)) return;
-    if (sebep === 'baglanti') return canliCiz();   // yalnız bağlantı yazısı değişir
     guncelle();
   },
   temizle() {
-    ro?.disconnect(); ro = null;
-    document.removeEventListener('fullscreenchange', tamEkranCiz);
+    document.removeEventListener('fullscreenchange', tamEkranDegisti);
     kok?.removeEventListener('click', tikla); kok?.removeEventListener('keydown', tus);
-    kok = null; model = null; olcek = null; fare = null; onbellek.clear();
+    kok?.classList.remove('db-tam');
+    kok = null; model = null; onbellek.clear();
   },
 };
