@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "72. Komite · Seçim Masası",
+  "short_name": "Seçim Masası",
+  "description": "72. Komite seçim günü masası: kişiler, araçlar, saha ve canlı rapor.",
+  "lang": "tr",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#C8102E",
+  "theme_color": "#C8102E",
+  "categories": ["productivity", "business"],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "img/ikon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "img/ikon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "img/ikon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "img/ikon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Saha", "short_name": "Saha", "description": "Sahadaki kişiler ve araç", "url": "./#saha", "icons": [{ "src": "img/ikon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Canlı rapor", "short_name": "Rapor", "description": "Anlık sayılar ve gidişat", "url": "./#rapor", "icons": [{ "src": "img/ikon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ]
+}
