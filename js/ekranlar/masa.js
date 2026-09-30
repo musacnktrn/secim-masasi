@@ -304,6 +304,7 @@ function belirsizCiz(zorla = false) {
   const imza = [S.kume, liste.map(f => [f.id, f.durum, f.ilce, f.yetkili, f.unvan].join('|')).join(';')].join('#');
   if (!zorla && imza === S.imza.bel) return; S.imza.bel = imza;
   const kaydir = kok.querySelector('.masa-bel-c')?.scrollLeft || 0;
+  kok.classList.toggle('acik', S.kume !== null);   // ilçe açıkken şerit büyür, kişiler ızgara halinde alt alta dizilir
   const sirali = [...kumeler.entries()].sort((a, b) => b[1].length - a[1].length || (a[0] || '￿').localeCompare(b[0] || '￿', 'tr'));
   const acik = S.kume !== null ? (kumeler.get(S.kume) || []).slice().sort((a, b) => kisa(a).localeCompare(kisa(b), 'tr')) : [];
   kok.innerHTML = `
@@ -898,6 +899,10 @@ function stilEkle() {
 .masa-bel-g { margin-left: auto; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 600; cursor: pointer; }
 .masa-bel-c { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; flex-wrap: nowrap; scrollbar-width: none; }
 .masa-bel-c::-webkit-scrollbar { display: none; }
+.masa-bel.acik { height: auto; max-height: 42vh; }
+.masa-bel.acik .masa-bel-c { flex-wrap: wrap; overflow-x: hidden; overflow-y: auto; align-content: flex-start; scrollbar-width: thin; padding-bottom: 2px; }
+.masa-bel.acik .masa-bel-c::-webkit-scrollbar { display: block; width: 6px; }
+.masa-bel.acik .masa-bel-c::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
 .masa-kume { flex: none; height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 11px; border-radius: 99px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .masa-kume:hover, .masa-kisi-c:hover { border-color: var(--ink-3); }
 .masa-kume span { font-weight: 800; font-variant-numeric: tabular-nums; background: var(--surface-3); border-radius: 99px; padding: 1px 7px; }
