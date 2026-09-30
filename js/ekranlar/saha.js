@@ -646,13 +646,15 @@ function temaYaz(t) {
   if (h.dataset.theme !== theme) h.dataset.theme = theme;
   try { if (localStorage.getItem('secim-tema') !== t) localStorage.setItem('secim-tema', t); } catch {}
 }
-function temaKoru() { temaYaz(temaIstenen); }
-function temaDegistir() { temaIstenen = temaIstenen === 'koyu' ? 'acik' : 'koyu'; temaYaz(temaIstenen); }
+// HATA DÜZELTMESİ (Musa 2026-09-30): eskiden her dokunuşta temaIstenen geri yazılıyordu (window click koruyucusu);
+// tema başka yerden (üst çubuk) değişince boş yere dokunmak temayı çeviriyordu. Koruyucu kaldırıldı, tema her zaman belgeden okunur.
+const temaSimdi = () => (document.documentElement.dataset.tema === 'koyu' ? 'koyu' : 'acik');
+function temaDegistir() { temaIstenen = temaSimdi() === 'koyu' ? 'acik' : 'koyu'; temaYaz(temaIstenen); }
 function hesapAc() {
   const m = modal('Hesap', `
     <div class="saha-hesap">
       <div class="saha-hesap-kim"><b>${esc(store.ben.ad_soyad)}</b><span>${esc(ROL_AD[store.ben.rol] || store.ben.rol)}</span></div>
-      <button class="saha-btn" data-h-tema>${IKON.tema}<span>${temaIstenen === 'koyu' ? 'Açık temaya geç' : 'Koyu temaya geç'}</span></button>
+      <button class="saha-btn" data-h-tema>${IKON.tema}<span>${temaSimdi() === 'koyu' ? 'Açık temaya geç' : 'Koyu temaya geç'}</span></button>
       <button class="saha-btn tehlike" data-h-cikis>${IKON.cikis}<span>Çıkış yap</span></button>
     </div>`);
   m.addEventListener('click', e => {
@@ -806,7 +808,6 @@ export default {
     kok.addEventListener('keydown', tusBasildi);
     try { temaIstenen = localStorage.getItem('secim-tema') === 'koyu' ? 'koyu' : 'acik'; } catch { temaIstenen = document.documentElement.dataset.tema === 'koyu' ? 'koyu' : 'acik'; }
     temaYaz(temaIstenen);
-    window.addEventListener('click', temaKoru);
     gorunurlukDinle = gorunurlukDegisti; document.addEventListener('visibilitychange', gorunurlukDinle);
     zamanlayicilar.push(setInterval(konumCiz, 5000));
     ciz();
@@ -816,7 +817,6 @@ export default {
     zamanlayicilar.forEach(clearInterval); zamanlayicilar = [];
     clearTimeout(aramaZaman); clearTimeout(miniZaman); clearTimeout(flashZaman);
     konumDurdur({ kalici: false });
-    window.removeEventListener('click', temaKoru);
     if (gorunurlukDinle) document.removeEventListener('visibilitychange', gorunurlukDinle);
     gorunurlukDinle = null;
     document.body.classList.remove('saha-acik');
