@@ -2,8 +2,8 @@
 // 3 metreden okunur: hero "oy_bizde / hedef", saatlik geliş (gerçekleşen yeşil bar / beklenen kesik), referans liderlik tablosu,
 // ilçe dağılımı, araç kullanımı + boşta araçlar, ulaşım türü ve üç eylem listesi (Kesin bizde henüz gelmedi · Geciken alımlar · Evrak uyarılı).
 // Her rakam store'dan hesaplanır; canlı olay gelince yalnız değişen bölümün DOM'u yenilenir (kaydırma ve filtre korunur).
-import { store, esc, fmt, trBaslik, simdi, simdiDk, dakika, sayac, gecikme, ulasim, firmaListesi, aracOf, DURUM_AD, referansBenMi, karsiladim, isaretleyebilirMi } from '../core.js';
-import { kisiKartiAc, toast, hataGoster } from '../ui.js';
+import { store, esc, fmt, trBaslik, simdi, simdiDk, dakika, sayac, gecikme, ulasim, firmaListesi, aracOf, DURUM_AD, referansBenMi, karsiladim, isaretleyebilirMi, yazabilirMi } from '../core.js';
+import { kisiKartiAc, toast, hataGoster, paletAc } from '../ui.js';
 
 const TERCIH_ANAHTAR = 'secim-dashboard-tercih';
 const YOKSAY = new Set(['asistan', 'istek', 'profil', 'baglanti']);
@@ -170,6 +170,16 @@ function stilEkle() {
   const eski = document.querySelector('style[data-ekran="dashboard"]'); if (eski) eski.remove();
   const st = document.createElement('style'); st.dataset.ekran = 'dashboard';
   st.textContent = `
+.db-isaretle { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0 0 12px; padding: 12px 18px; border: 0; border-radius: 14px; background: var(--red); color: #fff; cursor: pointer; font: inherit; text-align: left; box-shadow: 0 6px 18px rgba(200,16,46,.25); flex: none; }
+.db-isaretle:active { transform: scale(.99); }
+.db-isaretle-i { width: 34px; height: 34px; border-radius: 50%; background: rgba(255,255,255,.2); display: grid; place-items: center; font-size: 18px; font-weight: 900; flex: none; }
+.db-isaretle-m { display: flex; flex-direction: column; font-size: 17px; font-weight: 800; line-height: 1.2; }
+.db-isaretle-m small { font-size: 12px; font-weight: 500; opacity: .85; }
+@media (max-width: 900px) {
+  .db-isaretle { position: fixed; left: 12px; right: 88px; bottom: calc(12px + var(--guvenli-alt, 0px)); width: auto; margin: 0; z-index: 40; min-height: 60px; }
+  .db { padding-bottom: calc(84px + var(--guvenli-alt, 0px)); }
+}
+
 .icerik.db-tam { max-width: none; margin: 0; padding: 16px 20px; display: flex; flex-direction: column; }
 .kabuk:has(> .icerik.db-tam) { height: 100vh; height: 100dvh; min-height: 0; }
 .icerik.db-tam { flex: 1 1 0; min-height: 0; overflow: hidden; }
@@ -335,7 +345,9 @@ function stilEkle() {
 
 // ---------------------------------------------------------------- iskelet (bir kez)
 function iskeletHtml() {
-  return `
+  // Gelen kişiyi işaretle: ad / firma / telefon yaz, satırdaki "Oy kullandı" ile tek dokunuş (ortak palet)
+  const isaretDugme = yazabilirMi() ? '<button type="button" class="db-isaretle" data-isaretle><span class="db-isaretle-i">✓</span><span class="db-isaretle-m">Gelen kişiyi işaretle<small>ad, firma ya da telefon yaz</small></span></button>' : '';
+  return `${isaretDugme}
   <div class="db">
     <div class="db-kol">
       <section class="db-kart db-hero" data-b="hero"></section>
@@ -556,6 +568,7 @@ function guncelle() {
 
 // ---------------------------------------------------------------- etkileşim (olay devri, bir kez)
 function tikla(e) {
+  if (e.target.closest('[data-isaretle]')) { paletAc(); return; }
   if (e.target.closest('a[href]')) return;                         // Ara / Şoför bağlantıları kendi işini yapar, kartı açmaz
   const tam = e.target.closest('[data-tam]');
   if (tam) { (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())?.catch?.(() => {}); return; }

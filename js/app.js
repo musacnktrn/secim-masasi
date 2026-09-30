@@ -30,8 +30,24 @@ function varsayilanYol() {
   if (r === 'sorumlu') return 'sorumlu';
   if (r === 'kurul') return dar() ? 'saha' : 'masa';   // Yönetim kurulu = masa düzeyi
   if (r === 'rapor') return dar() ? 'rapor' : 'dashboard';
-  return dar() ? 'saha' : 'masa';
+  return 'dashboard';   // Musa 2026-10-01: masa ve Admin için ana ekran Dashboard (telefonda da)
 }
+// iPhone düzeltmesi (Musa 2026-10-01): bir kutuya dokunup klavye açılınca iOS sayfayı yukarı itiyor, klavye kapanınca
+// geri indirmiyor; üst çubuk Dynamic Island altına girip dokunulamaz oluyor. Klavye kapanınca ya da kutudan çıkınca
+// sayfa geçerli kaydırma sınırına geri oturtulur (iOS'un görsel/yerleşim görüntü alanı kaymasını sıfırlar).
+(() => {
+  const vv = window.visualViewport; if (!vv) return;
+  const yaziyor = () => /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+  const duzelt = () => {
+    if (yaziyor()) return;
+    const enCok = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    window.scrollTo(window.scrollX, Math.min(Math.max(0, window.scrollY - (vv.offsetTop || 0)), enCok));
+  };
+  let tamBoy = vv.height;
+  vv.addEventListener('resize', () => { if (vv.height >= tamBoy - 60) setTimeout(duzelt, 80); tamBoy = Math.max(tamBoy, vv.height); });
+  document.addEventListener('focusout', () => setTimeout(duzelt, 150));
+  window.addEventListener('orientationchange', () => { tamBoy = 0; setTimeout(() => { tamBoy = vv.height; duzelt(); }, 300); });
+})();
 const KISAYOL = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '') ? '⌘K' : 'Ctrl K';
 
 // ---------------------------------------------------------------- tema

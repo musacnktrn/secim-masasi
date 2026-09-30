@@ -621,3 +621,6 @@ body.saha-acik .mb-baglanti:not(.kopuk), html.rapor-acik .mb-baglanti:not(.kopuk
   .kk-kutu.kk-oy-bekliyor .kk-kutu-orta .u, .kk-kutu.kk-oy-bekliyor .kk-kutu-orta .a { white-space: normal; }
   .kk-kutu.kk-oy-bekliyor .kk-mini { order: 2; flex: 1; justify-content: center; height: 44px; font-size: 14px; }
 }
+
+/* iPhone: sayfanın üstten aşağı çekilip (lastik bant) üst çubuğun kaymasını engelle · 2026-10-01 */
+html, body { overscroll-behavior-y: none; }
