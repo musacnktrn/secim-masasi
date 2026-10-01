@@ -129,7 +129,9 @@ export const ulasim = f => f.servis ? 'servis' : f.kendisi_gelecek ? 'kendi' : '
 export const firmaAdi = f => trBaslik(f?.yetkili || f?.unvan || '');
 export const aracOf = f => f?.arac_id ? store.araclar.get(f.arac_id) : null;
 export function aramaEslesir(f, q) {
-  if (!q) return true; const t = trArama(q);
+  if (!q) return true;
+  const qq = String(q).trim(); if (/^\d{1,3}$/.test(qq)) return String(f.ilzam_no ?? '') === qq;   // 1-3 hane = ilzam belgesi no (Musa 2026-10-01)
+  const t = trArama(q);
   const alanlar = [f.unvan, f.yetkili, f.yetkili2, f.referans, f.referans2, f.ilce, f.adres, f.cep, f.cep2, f.sabit_tel, f.ticari_sicil, f.oda_sicil, f.notlar];
   const hay = trArama(alanlar.join(' ')); const rakam = t.replace(/\D/g, '');
   return t.split(' ').every(p => hay.includes(p)) || (rakam.length >= 4 && alanlar.join(' ').replace(/\D/g, '').includes(rakam));

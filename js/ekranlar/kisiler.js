@@ -6,7 +6,7 @@ import {
   aracOf, aramaEslesir, referanslar, ilceler, firmaListesi, firmaAdi, simdiDk, dakika, ekip,
   ROL_AD, referansBenMi, karsiladim, isaretleyebilirMi,
 } from '../core.js';
-import { $, bas, isaretle, kisiKartiAc, toast, hataGoster } from '../ui.js';
+import { $, bas, isaretle, kisiKartiAc, toast, hataGoster, ilzamRozet } from '../ui.js';
 
 // ---------------------------------------------------------------- sabitler
 const SAYFA = 200;                       // ilk açılışta ve her "daha fazla"da eklenen satır
@@ -311,7 +311,7 @@ function satirHtml(f, yaz, g, dar) {
   const altSatir = [f.tur, f.oda_sicil ? 'Oda sicil ' + f.oda_sicil : ''].filter(Boolean).join(' · ');
   const ref = f.referans ? `<span title="${esc(refAd(f.referans) + (f.referans2 ? ' + ' + refAd(f.referans2) : ''))}">${esc(refAd(f.referans))}</span>` : '<span class="ks-yok">Yok</span>';
   return `<div class="ks-satir${f.id === secili ? ' secili' : ''}" data-id="${f.id}">
-    <div class="c-firma"><div class="ks-firma" title="${esc(f.unvan || '')}">${esc(f.unvan || '')}</div>${altSatir ? `<div class="ks-firma-alt">${esc(altSatir)}</div>` : ''}</div>
+    <div class="c-firma"><div class="ks-ilzam" style="margin-bottom:3px">${ilzamRozet(f, 'kucuk')}</div><div class="ks-firma" title="${esc(f.unvan || '')}">${esc(f.unvan || '')}</div>${altSatir ? `<div class="ks-firma-alt">${esc(altSatir)}</div>` : ''}</div>
     <div class="c-yet"><div class="ks-ad" title="${esc(trBaslik(f.yetkili || ''))}">${f.yetkili ? esc(trBaslik(f.yetkili)) : '<span class="ks-yok">Yetkili yok</span>'}</div>${f.yetkili2 ? `<div class="ks-ad2" title="2. yetkili: ${esc(trBaslik(f.yetkili2))}">+ ${esc(trBaslik(f.yetkili2))}</div>` : ''}</div>
     <div class="c-cep">${telHucre(f, dar)}</div>
     <div class="c-ilce">${esc(trBaslik(f.ilce || ''))}</div>

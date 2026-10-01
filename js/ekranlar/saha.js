@@ -9,7 +9,7 @@ import {
   aracKonum, firmaKonum, ulasim, sayac, aracDurumYap, konumGonder, notEkle, durumYap, kisiGrubu,
   karsiladim, referansBenMi, isaretleyebilirMi, oyBekliyor, oyOnaylayabilirMi, oyOnayla, oyReddet,
 } from '../core.js';
-import { toast, hataGoster, onayla, isaretle, kisiKartiAc, modal, modalKapat } from '../ui.js';
+import { toast, hataGoster, onayla, isaretle, kisiKartiAc, modal, modalKapat, ilzamRozet } from '../ui.js';
 import asistan from '../asistan.js';
 
 // ---------------------------------------------------------------- sabitler
@@ -272,6 +272,7 @@ function kartHtml(f, { sofor = false, kucuk = false } = {}) {
       <div class="saha-kart-sag">${gunHtml(f)}</div>
     </div>
     <div class="saha-kimlik saha-tikla" data-kisi="${f.id}">
+      <div class="saha-ilzam" style="margin-bottom:4px">${ilzamRozet(f, 'buyuk')}</div>
       <div class="saha-ad">${esc(firmaAdi(f))}</div>
       <div class="saha-firma">${esc(f.unvan || '')}</div>
       ${kucuk ? '' : adresHtml(f)}
@@ -463,6 +464,7 @@ function durakHtml(a, f) {
   <div class="saha-sira">
     <div class="saha-sira-ust"><div class="saha-sira-etiket">SIRADAKİ DURAK</div><div class="saha-sira-saat">${esc(fmt.saatKisa(f.tasima_saati) || 'Saat belirsiz')}</div></div>
     <div class="saha-sira-kimlik saha-tikla" data-kisi="${f.id}">
+      <div class="saha-ilzam" style="margin-bottom:4px">${ilzamRozet(f, 'buyuk')}</div>
       <div class="saha-sira-ad">${esc(firmaAdi(f))}</div>
       ${adr || ilce ? `<div class="saha-sira-adres">${esc(adr)}${ilce && !ilceVar ? `${adr ? ' · ' : ''}<b>${esc(ilce)}</b>` : ''}</div>` : ''}
     </div>

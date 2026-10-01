@@ -63,6 +63,15 @@ const STIL = `
 .kaynak-cip.src-surucu, .kk-src.src-surucu { background:var(--surface); color:var(--ink-2); border:1px solid var(--line-2); }
 .kaynak-cip.src-excel, .kk-src.src-excel { background:var(--surface-3); color:var(--ink-2); border:1px solid var(--surface-3); font-style:italic; }
 
+/* ---- İLZAM BELGESİ NUMARASI (Musa 2026-10-01 09:17: masada kağıdı bulmak için her yerde büyük görünür) ---- */
+.ilzam-no { display:inline-flex; align-items:baseline; gap:6px; padding:4px 10px; border-radius:8px; background:var(--ink); color:var(--surface); font-size:11px; font-weight:800; letter-spacing:.08em; white-space:nowrap; line-height:1.1; flex:none; }
+.ilzam-no b { font-size:19px; font-weight:900; letter-spacing:0; font-variant-numeric:tabular-nums; }
+.ilzam-yok { display:inline-flex; align-items:center; padding:5px 10px; border-radius:8px; background:var(--red-soft); color:var(--red); border:1.5px solid var(--red); font-size:11.5px; font-weight:900; letter-spacing:.04em; white-space:nowrap; line-height:1.1; flex:none; }
+.ilzam-no.buyuk { padding:6px 14px; font-size:13px; } .ilzam-no.buyuk b { font-size:30px; }
+.ilzam-yok.buyuk { padding:9px 14px; font-size:14px; }
+.ilzam-no.kucuk { padding:2px 7px; font-size:10px; } .ilzam-no.kucuk b { font-size:14px; } .ilzam-yok.kucuk { padding:2px 7px; font-size:10px; }
+.pl-ilzam { flex:none; }
+
 /* ---- çekmece arka planı ---- */
 .cekmece-arka { background:var(--scrim); }
 
@@ -542,6 +551,7 @@ export function kisiKartiHtml(id) {
       <button type="button" class="kk-kapat" data-e="kapat" title="Kapat (Esc)">×</button>
     </div>
     <div class="kk-rozetler">
+      ${ilzamRozet(f, 'buyuk')}
       ${yonet ? `<button type="button" class="kk-sinif-btn" data-e="menu" data-v="sinif">${sinifRozet}</button>` : sinifRozet}
       <span class="sm-b g-${esc(f.durum)}">${esc(gunEtiket(f.durum))}</span>
       <span class="sm-b ul ul-${ul}">${ULASIM_AD[ul]}</span>
@@ -662,7 +672,7 @@ export function kisiKartiHtml(id) {
     ]),
     grup('SEÇİM', [
       satir('Referans', adYaz(f.referans), S), satir('Referans 2', adYaz(f.referans2)),
-      satir('İlzam', adYaz(f.ilzam)), satir('Yetki', f.yetki ? 'Var' : 'Yok'),
+      satir('İlzam no', f.ilzam_no ? '<b>' + esc(f.ilzam_no) + '</b>' : '<b style="color:var(--red)">İlzam belgesi yok</b>'), satir('İlzam', adYaz(f.ilzam)), satir('Yetki', f.yetki ? 'Var' : 'Yok'),
       satir('Zayi', f.zayi ? 'Var' : 'Yok', f.zayi ? W : ''), satir('Sicil notu', esc(f.sicil_notu || tire), f.sicil_notu ? W : ''),
     ]),
     grup('FİRMA', [
@@ -770,7 +780,14 @@ async function kartTikla(ev) {
 
 // ---------------------------------------------------------------- Cmd+K HIZLI ARAMA (masadaki en sık iş: gelen kişiyi bul, işaretle)
 let paletSecim = 0, paletSonuc = [];
+// İlzam belgesi numarası: her yerde aynı rozet (numara yoksa "İLZAM BELGESİ YOK")
+export function ilzamRozet(f, boyut = '') {
+  return f?.ilzam_no ? `<span class="ilzam-no ${boyut}" title="İlzam belgesi dosya numarası">İLZAM <b>${esc(f.ilzam_no)}</b></span>`
+    : `<span class="ilzam-yok ${boyut}" title="Bu firmanın ilzam belgesi yok">İLZAM BELGESİ YOK</span>`;
+}
 function paletAra(q) {
+  const qq = String(q || '').trim();
+  if (/^\d{1,3}$/.test(qq)) return firmaListesi().filter(f => String(f.ilzam_no ?? '') === qq).slice(0, 7);   // 1-3 hane = ilzam no
   const t = trArama(q); if (t.length < 2) return [];
   const kelimeler = t.split(' ');
   const skorlu = [];
@@ -787,7 +804,7 @@ function paletAra(q) {
 export function paletAc(baslangic = '') {
   paletKapat();
   if (acikKisi != null) cekmeceKapat();   // tasarım: palet açılınca kişi kartı kapanır
-  const p = el(`<div class="palet" role="dialog" aria-label="Hızlı arama"><div class="pl-ust"><span class="pl-ikon">⌕</span><input class="pl-girdi" placeholder="İsim ya da firma yaz… 2 harf yeter" value="${esc(baslangic)}" autocomplete="off" spellcheck="false" aria-label="Kişi ara"><span class="pl-esc">ESC</span></div><div class="palet-liste"></div><div class="pl-ayak"><span>↑↓ seç</span><span>↵ oy kullandı</span><span>⇧↵ kartı aç</span><span class="sag">Her işaret 5 sn içinde geri alınabilir</span></div></div>`);
+  const p = el(`<div class="palet" role="dialog" aria-label="Hızlı arama"><div class="pl-ust"><span class="pl-ikon">⌕</span><input class="pl-girdi" placeholder="İsim, firma ya da ilzam no yaz…" value="${esc(baslangic)}" autocomplete="off" spellcheck="false" aria-label="Kişi ara"><span class="pl-esc">ESC</span></div><div class="palet-liste"></div><div class="pl-ayak"><span>↑↓ seç</span><span>↵ oy kullandı</span><span>⇧↵ kartı aç</span><span class="sag">Her işaret 5 sn içinde geri alınabilir</span></div></div>`);
   const arka = el('<div class="cekmece-arka" data-palet-arka style="z-index:105"></div>');
   arka.onclick = paletKapat;
   $('#katman').append(arka, p);
@@ -803,6 +820,7 @@ export function paletAc(baslangic = '') {
       const isaret = isaretleyebilirMi(f), oy = f.durum === 'oy_kullandi';
       return `
       <div class="palet-satir ${i === paletSecim ? 'secili' : ''}" data-i="${i}">
+        <div class="pl-ilzam">${ilzamRozet(f)}</div>
         <div class="pl-sol">
           <div class="pl-ad-satir"><div class="pl-ad">${esc(f.yetkili ? trBaslik(f.yetkili) : f.unvan)}</div>
             <div class="pl-rozetler"><span class="sm-b v-${esc(f.oy_sinifi)}">${esc(buyuk(SINIF_AD[f.oy_sinifi] || f.oy_sinifi))}</span>${f.evrak_uyari ? '<span class="sm-b b-evrak">▲ EVRAK</span>' : ''}${f.kisi_oy_sayisi > 1 ? `<span class="sm-b b-2oy">${f.kisi_oy_sayisi} OY</span>` : ''}</div></div>
