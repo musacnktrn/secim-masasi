@@ -20,14 +20,16 @@ const SEKMELER = [
   { k: 'whatsapp', ad: 'WhatsApp bildirimleri' },
   { k: 'veri', ad: 'Veri' },
 ];
-const ROL_SIRA = { yonetici: 0, kurul: 1, masa: 2, sorumlu: 3, sofor: 4, rapor: 5, bot: 6 };
-const ROL_SECENEK = ['masa', 'kurul', 'rapor', 'sofor', 'sorumlu', 'yonetici'];
+const ROL_SIRA = { yonetici: 0, kurul: 1, masa: 2, arac_yoneticisi: 3, sorumlu: 3, sofor: 4, rapor: 5, bot: 6 };
+// 'arac_yoneticisi' yalnız görev defteri olan seçimde (KOMITE.dispec, 26-27); 72'nin veritabanında bu rol yok
+const ROL_SECENEK = ['masa', 'kurul', 'rapor', 'sofor', 'sorumlu', ...(KOMITE.dispec ? ['arac_yoneticisi'] : []), 'yonetici'];
 const ROL_ACIKLAMA = {
   masa: 'Masa, kişiler, harita, işaretleme',
   kurul: 'Masa düzeyinde görür ve işaretler; ayar ve kullanıcı yönetimi yok',
   rapor: 'Yalnız telefon raporu, salt okunur',
   sofor: 'Yalnız kendi aracı ve yolcuları',
   sorumlu: 'Sorumlu olduğu kişiler ve araçlar',
+  arac_yoneticisi: 'Araç yöneticisi ekranı: boş araçlar, görevler, alınacak kişiler; tek dokunuşla şoföre atar',
   yonetici: 'Tüm ekranlar + Admin paneli',
 };
 const RISK_AD = { dusuk: 'Düşük', orta: 'Orta', yuksek: 'Yüksek' };

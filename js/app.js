@@ -8,17 +8,21 @@ import { $, el, bas, paletAc, toast, hataGoster, cekmeceKapat, kisiKartiAc } fro
 // Ekranlar: yol -> modül yolu + izinli roller + menü
 export const EKRANLAR = {
   masa:      { dosya: './ekranlar/masa.js',      ad: 'Masa',      roller: ['yonetici', 'kurul', 'masa'] },
-  kisiler:   { dosya: './ekranlar/kisiler.js',   ad: 'Kişiler',   roller: ['yonetici', 'kurul', 'masa', 'rapor'] },
+  // araç yöneticisi ekranı: yalnız görev defteri olan seçimde (KOMITE.dispec, 26-27). 72'de menüde yok, adresle de açılmaz.
+  dispec:    { dosya: './ekranlar/dispec.js',    ad: 'Araç yöneticisi', roller: ['yonetici', 'arac_yoneticisi'], dispec: true },
+  kisiler:   { dosya: './ekranlar/kisiler.js',   ad: 'Kişiler',   roller: ['yonetici', 'kurul', 'masa', 'rapor', 'arac_yoneticisi'] },
   harita:    { dosya: './ekranlar/harita.js',    ad: 'Harita',    roller: ['yonetici', 'kurul', 'masa', 'rapor', 'arac_yoneticisi'] },
-  araclar:   { dosya: './ekranlar/araclar.js',   ad: 'Araçlar',   roller: ['yonetici', 'kurul', 'masa'] },
+  araclar:   { dosya: './ekranlar/araclar.js',   ad: 'Araçlar',   roller: ['yonetici', 'kurul', 'masa', 'arac_yoneticisi'] },
   dashboard: { dosya: './ekranlar/dashboard.js', ad: 'Dashboard', roller: ['yonetici', 'kurul', 'masa', 'rapor'] },
   yonetim:   { dosya: './ekranlar/yonetim.js',   ad: 'Admin',     roller: ['yonetici'] },
   saha:      { dosya: './ekranlar/saha.js',      ad: 'Saha',      roller: ['yonetici', 'kurul', 'masa', 'sofor'], mobil: true },
   rapor:     { dosya: './ekranlar/rapor.js',     ad: 'Rapor',     roller: ['yonetici', 'kurul', 'masa', 'rapor', 'sofor', 'sorumlu'], mobil: true },
   sorumlu:   { dosya: './ekranlar/sorumlu.js',   ad: 'Araç sorumlusu', roller: ['yonetici', 'kurul', 'masa', 'sorumlu'], mobil: true },
-  bildirimler: { dosya: './ekranlar/bildirimler.js', ad: 'Bildirimler', roller: ['yonetici', 'kurul', 'masa', 'rapor', 'sofor', 'sorumlu'], mobil: true },
+  bildirimler: { dosya: './ekranlar/bildirimler.js', ad: 'Bildirimler', roller: ['yonetici', 'kurul', 'masa', 'rapor', 'sofor', 'sorumlu', 'arac_yoneticisi'], mobil: true },
 };
-const MENU = ['masa', 'kisiler', 'harita', 'araclar', 'dashboard', 'yonetim'];
+const MENU = ['masa', 'dispec', 'kisiler', 'harita', 'araclar', 'dashboard', 'yonetim'];
+// ekran bu kullanıcıya ve bu seçime açık mı ('dispec: true' ekranlar yalnız KOMITE.dispec olan seçimde)
+const ekranAcik = (yol, rol = store.ben?.rol) => !!EKRANLAR[yol] && EKRANLAR[yol].roller.includes(rol) && (!EKRANLAR[yol].dispec || !!KOMITE.dispec);
 const dar = () => matchMedia('(max-width: 759px)').matches;   // innerWidth taşan içerikle büyüyebiliyor; medya sorgusu cihaz genişliğine bakar
 // Telefon gezinmesi (2026-10-01): dar ekranda (≤900 px) ve ana ekrana eklenmiş uygulamada üst menü yerine
 // sol üstte ☰ (yan çekmece) + ana ekran dışında "‹ Geri". Mobil kabuklu ekranlar (saha, rapor, bildirimler) her genişlikte bu çubuğu alır.
@@ -31,6 +35,7 @@ function varsayilanYol() {
   if (r === 'sorumlu') return 'sorumlu';
   if (r === 'kurul') return dar() ? 'saha' : 'masa';   // Yönetim kurulu = masa düzeyi
   if (r === 'rapor') return dar() ? 'rapor' : 'dashboard';
+  if (r === 'arac_yoneticisi') return KOMITE.dispec ? 'dispec' : 'araclar';   // 26-27: araç yöneticisinin ana ekranı
   return 'dashboard';   // Musa 2026-10-01: masa ve Admin için ana ekran Dashboard (telefonda da)
 }
 // iPhone düzeltmesi (Musa 2026-10-01): bir kutuya dokunup klavye açılınca iOS sayfayı yukarı itiyor, klavye kapanınca
@@ -79,6 +84,7 @@ const ZIL_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" str
 // ---- telefon gezinmesi: üst çubuk + yan çekmece + geri yığını
 const IK = p => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 const MB_OGE = [
+  { yol: 'dispec', ad: 'Araç yöneticisi', alt: 'Boş araçlar, görevler, alınacaklar', ikon: IK('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M3.5 9h3M17.5 9h3"/>') },
   { yol: 'saha', ad: 'Liste', alt: 'Telefonda hızlı işaretleme', ikon: IK('<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>') },
   { yol: 'sorumlu', ad: 'Araç listem', alt: 'Sorumlu olduğun araçlar', ikon: IK('<rect x="2" y="7" width="15" height="10" rx="2"/><path d="M17 10h3l2 3v4h-5"/><circle cx="7" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/>'), yalniz: ['sorumlu'] },
   { yol: 'masa', ad: 'Masa', alt: 'Tam masa görünümü ve akış', ikon: IK('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>') },
@@ -91,7 +97,7 @@ const MB_OGE = [
   { yol: 'yonetim', ad: 'Admin', alt: 'Kullanıcılar, ayarlar, onaylar', ikon: IK('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>') },
 ];
 const mbAd = yol => MB_OGE.find(o => o.yol === yol)?.ad || EKRANLAR[yol]?.ad || '';
-const mbOgeler = () => MB_OGE.filter(o => EKRANLAR[o.yol]?.roller.includes(store.ben?.rol) && (!o.yalniz || o.yalniz.includes(store.ben?.rol)));
+const mbOgeler = () => MB_OGE.filter(o => ekranAcik(o.yol) && (!o.yalniz || o.yalniz.includes(store.ben?.rol)));
 let yigin = [], geriGidiyor = false, aktifAnahtar = '';
 const MENU_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
 function mbUstHtml(yol) {
@@ -164,7 +170,7 @@ function kabukHtml(yol, mobil) {
   document.body.classList.toggle('mb-acik', mb);
   if (mobil) return `${mbUstHtml(yol)}<div class="mobil-kabuk"><div id="ekran"></div></div>`;
   if (mb) return `<div class="kabuk mb-kabuk">${mbUstHtml(yol)}<div id="cevrimdisi"></div><main class="icerik" id="ekran"></main></div>`;
-  const menu = MENU.filter(y => EKRANLAR[y].roller.includes(store.ben.rol))
+  const menu = MENU.filter(y => ekranAcik(y))
     .map(y => `<a href="#${y}" class="${y === yol ? 'aktif' : ''}">${esc(EKRANLAR[y].ad)}${y === 'yonetim' ? onayRozeti() : ''}</a>`).join('');
   const rolAd = ROL_AD[store.ben.rol] || store.ben.rol;
   return `
@@ -354,7 +360,7 @@ async function git() {
   const [yol0, param] = decodeURIComponent(location.hash.slice(1)).split('/');
   if (!store.ben) { if (yol0 !== 'giris') location.hash = '#giris'; return girisGoster(); }
   let yol = yol0 || varsayilanYol();
-  if (!EKRANLAR[yol] || !EKRANLAR[yol].roller.includes(store.ben.rol)) { yol = varsayilanYol(); history.replaceState(null, '', '#' + yol); }
+  if (!ekranAcik(yol)) { yol = varsayilanYol(); history.replaceState(null, '', '#' + yol); }
   const tanim = EKRANLAR[yol];
   // geri yığını: başka ekrana geçerken önceki ekran yığına girer ("‹ Geri" ile dönülür); aynı ekranda parametre değişimi girmez
   const anahtar = yol + (param ? '/' + param : '');
@@ -434,6 +440,8 @@ mqDar.addEventListener?.('change', () => { if (store.ben && aktifYol && !EKRANLA
   // ?demo=1 (yalnız 72 dışı seçim, komite.js > DEMO): sahte veriyle açılır, veritabanına hiç bağlanmaz (js/demo.js)
   if ((await import('./komite.js')).DEMO) {
     try { (await import('./demo.js')).demoKur(); } catch (e) { console.error('demo kurulamadı', e); }
+    // araç yöneticisi ekranının örnek görevleri, boş araçları ve bekleyen kişileri (yalnız bellekte; ekranlar/dispec-demo.js)
+    if (KOMITE.dispec) { try { (await import('./ekranlar/dispec-demo.js')).dispecDemoKur(); } catch (e) { console.error('araç yöneticisi demosu kurulamadı', e); } }
   } else if (!kurulumBekliyor) {   // 26-27 veritabanı kurulumu sürerken hiçbir yere bağlanılmaz, giriş ekranı uyarı gösterir
     try { await profilYukle(); } catch (e) { console.warn(e); }
     if (store.ben) await acilis();

@@ -45,6 +45,7 @@ export const KOMITELER = {
     simge: '72', zilAd: '72. Komite',
     hubAlt: '1 Ekim 2026 · tamamlandı',
     ilzamListesi: true,                     // numaralı ilzam listesi var: numarasız kartta "İLZAM BELGESİ YOK", 1-3 hane arama = ilzam no
+    dispec: false,                          // araç yöneticisi ekranı (#dispec) yok: 72'de menüde görünmez, adresle de açılmaz
   },
   '2627': {
     k: '2627',
@@ -72,6 +73,7 @@ export const KOMITELER = {
     simge: '26-27', zilAd: '26-27 Çimento',
     hubAlt: '6 Ekim 2026 · 09:00-17:00 · Fuar İzmir',
     ilzamListesi: false,                    // ilzam listesi yok: rozet gizli, 1-3 hane normal arama
+    dispec: true,                           // araç yöneticisi ekranı (#dispec, rol 'arac_yoneticisi'): görev defteri (gorevler) bu seçimde var
     konumGir: true,                         // Harita: Admin ve araç yöneticisi şoförün sözlü konumunu girer (arac_konumlari.konum_metni bu projede var)
   },
 };
@@ -86,10 +88,22 @@ export function aktifKomite(arama = location.search) {
   return KOMITELER[k] ? k : null;
 }
 export const KOMITE_K = aktifKomite();
-// Uygulama modülleri yalnız ?k varken yüklenir (kapi.js); yine de k'siz yüklenirse 1 Ekim'deki gibi 72 davranır.
-export const KOMITE = KOMITELER[KOMITE_K || '72'];
 // ?demo=1: sahte veriyle gösterim (js/demo.js). Yalnız 72 dışındaki seçimde açılır; veritabanına hiç bağlanılmaz, hiçbir şey yazılmaz.
-export const DEMO = !!KOMITE_K && KOMITE_K !== '72' && new URLSearchParams(location.search).get('demo') === '1';
+const _arama = new URLSearchParams(location.search);
+export const DEMO = !!KOMITE_K && KOMITE_K !== '72' && _arama.get('demo') === '1';
+// Uygulama modülleri yalnız ?k varken yüklenir (kapi.js); yine de k'siz yüklenirse 1 Ekim'deki gibi 72 davranır.
+// Demoda Supabase adresi bilerek boş bırakılır ve depolama öneki ayrıdır ('secim2627demo'): demoda yapılan bir işaret
+// çevrimdışı sıraya düşse bile gerçek seçimin sırasına, oturumuna ya da veritabanına (anahtar yazıldıktan sonra da) asla karışmaz.
+const _temel = KOMITELER[KOMITE_K || '72'];
+export const KOMITE = DEMO
+  ? { ..._temel, onek: `${_temel.onek}demo`, kanal: `${_temel.kanal}-demo`, supaUrl: KURULUM_BEKLIYOR, supaAnon: KURULUM_BEKLIYOR }
+  : _temel;
+// Demoda saat taklidi verilmediyse oy gününün ortası (11:20) kullanılır: "17:00'ye kalan" gibi süreler gerçek bir gün gibi görünsün.
+// core.js saat taklidini (?saat=) yüklenirken okur; bu satır ondan önce çalışır (kapi.js > komite.js > app.js > core.js).
+if (DEMO && !_arama.get('saat')) {
+  _arama.set('saat', '11:20');
+  try { history.replaceState(history.state, '', `${location.pathname}?${_arama}${location.hash}`); } catch {}
+}
 
 // Tarayıcı depolama anahtarı: 72'de değişmez, 26-27'de 'secim2627' önekli (aynı alan adında iki seçimin oturumu,
 // çevrimdışı işaret sırası ve tercihleri karışmasın). 'secim-tema' -> 'secim2627-tema', 'rapor-sekme' -> 'secim2627-rapor-sekme'.
@@ -130,7 +144,7 @@ export function komiteLinki(taban = location.origin + location.pathname) {
   try { const u = new URL(taban, location.href); if (!u.searchParams.get('k')) u.searchParams.set('k', KOMITE.k); return u.href; }
   catch { return taban; }
 }
-export const surumMetni = (k = KOMITE_K) => (k ? `${SURUM} · ${k}` : SURUM);
+export const surumMetni = (k = KOMITE_K) => (k ? `${SURUM} · ${k}${DEMO ? ' · demo' : ''}` : SURUM);
 
 // Açılışta: <html data-komite>, sekme başlığı, tema rengi, manifest ve ikon bağlantıları bu seçime göre.
 // 72'de hepsi index.html'deki değerlerle aynıdır (değişiklik olmaz).

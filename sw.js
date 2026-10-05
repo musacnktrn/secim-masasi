@@ -41,6 +41,9 @@ const KABUK = [
   'js/ekranlar/rapor.js',
   'js/ekranlar/sorumlu.js',
   'js/ekranlar/bildirimler.js',
+  'js/ekranlar/dispec.js',          // araç yöneticisi (yalnız 26-27)
+  'js/ekranlar/dispec-demo.js',
+  'js/demo.js',
   'img/ikon-180.png',
   'img/ikon-192.png',
   'img/ikon-512.png',

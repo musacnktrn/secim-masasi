@@ -63,7 +63,7 @@ function kisaAd(f) {
 }
 const shortBy = b => { if (!b) return ''; const w = trBaslik(b).split(' ').filter(Boolean); return w.length > 1 ? `${w[0]} ${w[w.length - 1][0]}.` : trBaslik(b); };
 // "SOLFER SOĞUTMA ... LİMİTED ŞİRKETİ" -> "Solfer Soğutma ..." (yasal ek çıkar; taşan kısmı CSS keser)
-function kisaFirma(u) {
+export function kisaFirma(u) {
   const s = String(u || '').replace(/\s+(LİMİTED|LIMITED|ANONİM)\s+ŞİRKETİ\s*$/i, '').replace(/\s+(LTD\.?\s*ŞTİ\.?|A\.?\s?Ş\.?)\s*$/i, '').replace(/\s+SANAYİ\s+VE\s+TİCARET\s*$/i, '').trim();
   return trBaslik(s);
 }
@@ -74,7 +74,7 @@ const iyelik = w => {
   const s = { a: 'ın', ı: 'ın', e: 'in', i: 'in', o: 'un', u: 'un', ö: 'ün', ü: 'ün' }[sonUnlu(w)];
   return `${w}'${/[aeıioöuüAEIİOÖUÜ]$/.test(w) ? 'n' : ''}${s}`;
 };
-function mesafeKm(lat1, lon1, lat2, lon2) {
+export function mesafeKm(lat1, lon1, lat2, lon2) {
   const r = x => x * Math.PI / 180;
   const h = Math.sin(r(lat2 - lat1) / 2) ** 2 + Math.cos(r(lat1)) * Math.cos(r(lat2)) * Math.sin(r(lon2 - lon1) / 2) ** 2;
   return 2 * 6371 * Math.asin(Math.sqrt(h));
@@ -99,7 +99,7 @@ function duraklar(firmalar) {
 const durakBekliyor = d => d.firmalar.some(bekleyenMi);
 const durakTamam = d => d.firmalar.every(f => TAMAM.includes(f.durum));
 const durakGoster = d => d.firmalar.find(bekleyenMi) || d.f;    // gün rozeti için temsilci firma
-function yolcuHaritasi() {
+export function yolcuHaritasi() {
   const m = new Map();
   for (const f of store.firmalar.values()) if (f.arac_id) { if (!m.has(f.arac_id)) m.set(f.arac_id, []); m.get(f.arac_id).push(f); }
   return m;
@@ -121,7 +121,7 @@ function rotaBilgi(firmalar) {
   const ilc = f0?.rota_ilceler ? trBaslik(f0.rota_ilceler) : '';
   return { yok: false, tek: kodlar.size === 1, ad: `${ilc ? `${rotaAd} · ${ilc}` : rotaAd}${kodlar.size > 1 ? ` (+${kodlar.size - 1} rota)` : ''}`, ref: trBaslik(ref || kodRef) };
 }
-function aracOzet(a, harita) {
+export function aracOzet(a, harita) {
   const firmalar = harita.get(a.id) || [];
   const d = duraklar(firmalar);
   const bekleyen = d.filter(durakBekliyor);
@@ -135,7 +135,7 @@ function aracOzet(a, harita) {
 }
 const SIRA_DURUM = { yolda: 0, hazir: 1, fuarda: 2, mola: 3, arizali: 4 };
 const aracListesi = () => [...store.araclar.values()].sort((a, b) => (SIRA_DURUM[a.durum] ?? 9) - (SIRA_DURUM[b.durum] ?? 9) || fmt.plaka(a.plaka).localeCompare(fmt.plaka(b.plaka), 'tr', { numeric: true }));
-function konumBilgi(a) {
+export function konumBilgi(a) {
   if (!a.son_konum_zamani || a.son_lat == null) return { metin: 'konum yok', eski: false, yok: true };
   const dk = (Date.now() - new Date(a.son_konum_zamani).getTime()) / 60000;
   return { metin: fmt.goreli(a.son_konum_zamani), eski: dk > 10, yok: false, dk };
@@ -147,7 +147,8 @@ function siradakiMetin(o) {
 const dolulukOran = o => Math.min(100, Math.round((o.occ / o.kap) * 100));
 
 // servisle alınacak, henüz araç atanmamış ve alınmamış yolcular: rota koduna göre gruplu
-function aracsizlar() {
+// (mesafeKm, yolcuHaritasi, aracOzet, konumBilgi, aracsizlar araç yöneticisi ekranında da kullanılır: ekranlar/dispec.js)
+export function aracsizlar() {
   const adaylar = firmaListesi().filter(f => ulasim(f) === 'servis' && !aracVar(f) && bekleyenMi(f) && f.oy_sinifi !== 'oy_yok');
   const gm = new Map(); const tekler = [];
   for (const f of adaylar) {

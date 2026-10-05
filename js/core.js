@@ -542,3 +542,119 @@ export function kaynakMetni(o) {
   if (o.kaynak === 'sistem') return `Sistem · ${saat}`;
   return `El ile · ${o.kim_ad || '?'} · ${saat}`;
 }
+
+// ================================================================ GÖREV DEFTERİ + AJAN OLAYLARI (26-27 · ATLAS 2026-10-05)
+// Araç yöneticisi ekranı (#dispec) ve ileride ajanlar bu iki tablodan okur / yazar (şema: secim-2627/sema/10-2627-ekler.sql).
+// TEK ŞOFÖR KURALI veritabanında zorunlu (benzersiz indeks + tetikleyici + alim_ata / gorev_ata RPC). Aşağıdaki işlevler
+// aynı kuralı istek göndermeden ÖNCE istemcide de denetler: kullanıcı anlaşılır bir uyarı görür, ikinci şoföre iş gitmez.
+// 72'nin veritabanında bu tablolar yok: işlevler yalnız KOMITE.dispec olan seçimde çağrılır.
+// Demo (?demo=1): ekranlar/dispec-demo.js gorevMotoruKur() ile bellekte çalışan bir motor takar; o zaman hiçbir istek gitmez.
+ROL_AD.arac_yoneticisi = 'Araç yöneticisi';
+store.gorevler = new Map();      // id -> gorevler satırı
+store.ajanOlaylari = [];         // ajan_olaylari, en yeni başta, en çok 200
+store.gorevDurum = 'bos';        // bos | yukleniyor | hazir | hata
+store.gorevHata = '';
+export const GOREV_AKTIF = ['atandi', 'kabul', 'yolda'];           // iş bir şoförde
+export const GOREV_ACIK = ['acik', ...GOREV_AKTIF];                 // iş kapanmadı
+export const GOREV_DURUM_AD = { acik: 'Açık', atandi: 'Atandı', kabul: 'Kabul etti', yolda: 'Yolda', tamam: 'Tamamlandı', iptal: 'İptal', reddedildi: 'Reddetti' };
+export const gorevListesi = () => [...store.gorevler.values()];
+// bu aracın şu anki alım görevi (en çok bir tane olabilir)
+export const aracAktifGorev = aracId => gorevListesi().filter(g => g.tur === 'alim' && g.arac_id === aracId && GOREV_AKTIF.includes(g.durum)).sort((a, b) => b.id - a.id)[0] || null;
+// bu kişinin kapanmamış görevi (açık ya da bir şoförde)
+export const firmaAcikGorev = (firmaId, tur = 'alim') => gorevListesi().filter(g => g.firma_id === firmaId && g.tur === tur && GOREV_ACIK.includes(g.durum)).sort((a, b) => b.id - a.id)[0] || null;
+let gorevMotoru = null;
+export const gorevMotoruKur = m => { gorevMotoru = m; };
+export const gorevMotoruAl = () => gorevMotoru;
+const gorevKoy = g => { if (g?.id != null) store.gorevler.set(g.id, g); };
+function gorevHata(e) {
+  const m = String(e?.message || e);
+  if (/TEK_SOFOR/.test(m)) return new Error('Tek şoför kuralı: ' + m.replace(/^.*TEK_SOFOR:\s*/, ''));
+  if (/gorevler_firma_tek_aktif/.test(m)) return new Error('Bu kişi için zaten açık bir alım görevi var');
+  if (/gorevler_arac_tek_aktif_alim/.test(m)) return new Error('Bu araç şu an başka bir alımda');
+  return hataCevir(e);
+}
+export async function gorevYukle() {
+  if (gorevMotoru || kurulumBekliyor) return;
+  if (store.gorevDurum !== 'hazir') store.gorevDurum = 'yukleniyor';
+  try {
+    const [g, o] = await Promise.all([
+      hepsiniCek('gorevler', '*', { alan: 'id', artan: false }, 3000),
+      hepsiniCek('ajan_olaylari', '*', { alan: 'id', artan: false }, 200),
+    ]);
+    store.gorevler = new Map(g.map(x => [x.id, x])); store.ajanOlaylari = o; store.gorevDurum = 'hazir'; store.gorevHata = '';
+  } catch (e) { console.warn('görev defteri', e); if (store.gorevDurum !== 'hazir') store.gorevDurum = 'hata'; store.gorevHata = e?.message || String(e); }
+  bus.emit('gorevler');
+}
+// görev defteri ve ajan olayları için ayrı canlı kanal (ana kanal 1 Ekim'deki gibi kalır)
+let gorevKanal = null;
+export function gorevCanliBaglan() {
+  if (gorevKanal || gorevMotoru || kurulumBekliyor) return;
+  gorevKanal = sb.channel(`${KOMITE.kanal}-gorev`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'gorevler' }, p => {
+      if (p.eventType === 'DELETE') store.gorevler.delete(p.old.id); else gorevKoy(p.new);
+      bus.emit('gorev', { id: p.new?.id ?? p.old?.id, yeni: p.eventType === 'INSERT' ? p.new : null });
+    })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ajan_olaylari' }, p => {
+      if (!store.ajanOlaylari.some(o => o.id === p.new.id)) { store.ajanOlaylari.unshift(p.new); store.ajanOlaylari.length = Math.min(store.ajanOlaylari.length, 200); }
+      bus.emit('ajan_olay', { olay: p.new });
+    })
+    .subscribe(d => { if (d === 'SUBSCRIBED') gorevYukle(); });   // bağlantı (yeniden) kurulunca kaçırılanlar gelir
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) gorevYukle(); });
+}
+// TEK DOKUNUŞ ATAMA: "bu kişiyi şu araç alsın". Kişinin açık alım görevi yoksa açılır, varsa o kullanılır (alim_ata RPC).
+// zorla: atanmış görevi başka araca geçirir (yalnız araç yöneticisi ve Admin; veritabanı da denetler).
+export async function alimAta(firmaId, aracId, { zorla = false, aciliyet = null, not = null } = {}) {
+  const f = store.firmalar.get(firmaId), a = store.araclar.get(aracId);
+  if (!f) throw new Error('Kişi bulunamadı');
+  if (!a) throw new Error('Araç bulunamadı');
+  if (['mola', 'arizali'].includes(a.durum)) throw new Error(`${fmt.plaka(a.plaka)} şu an ${ARAC_DURUM_AD[a.durum].toLocaleLowerCase('tr')}, önce durumunu değiştir`);
+  const mevcut = firmaAcikGorev(firmaId);
+  if (mevcut && GOREV_AKTIF.includes(mevcut.durum)) {
+    if (mevcut.arac_id === aracId) return mevcut;   // aynı atama ikinci kez geldi (çift dokunuş): değişiklik yok
+    if (!zorla) { const ma = store.araclar.get(mevcut.arac_id); throw new Error(`Bu kişi zaten ${ma ? fmt.plaka(ma.plaka) : 'başka bir araçta'} (görev #${mevcut.id}). Başka şoföre vermek için "Başkasına ata".`); }
+  }
+  const mesgul = aracAktifGorev(aracId);
+  if (mesgul && mesgul.firma_id !== firmaId) throw new Error(`${fmt.plaka(a.plaka)} şu an başka bir alımda (görev #${mesgul.id}). Önce o görev bitmeli.`);
+  if (gorevMotoru) return gorevMotoru.alimAta(firmaId, aracId, { zorla, aciliyet, not });
+  if (!navigator.onLine) throw new Error('Çevrimdışı: atama bağlantı gelince yapılabilir');
+  const { data, error } = await sb.rpc('alim_ata', { p_firma: firmaId, p_arac: aracId, p_zorla: zorla, p_aciliyet: aciliyet, p_not: not || null });
+  if (error) throw gorevHata(error);
+  gorevKoy(data); bus.emit('gorev', { id: data?.id });
+  const ff = store.firmalar.get(firmaId);   // sunucu tetikleyicisi (gorev_sonra) firmalar.arac_id'yi de yazar; ekrana hemen yansısın
+  if (ff && ff.arac_id !== aracId) { store.firmalar.set(firmaId, { ...ff, arac_id: aracId }); bus.emit('firma', { id: firmaId }); }
+  return data;
+}
+// Görevin durumunu değiştir (iptal, tamam, reddedildi, kabul, yolda). İptal / ret firmalar.arac_id'yi sunucuda boşaltır.
+export async function gorevDurumYap(id, durum, { sebep = null } = {}) {
+  if (gorevMotoru) return gorevMotoru.gorevDurumYap(id, durum, { sebep });
+  const eski = store.gorevler.get(id);
+  const alan = { durum, ...(sebep ? { sebep } : {}) };
+  if (eski) { store.gorevler.set(id, { ...eski, ...alan }); bus.emit('gorev', { id }); }
+  const { data, error } = await sb.from('gorevler').update(alan).eq('id', id).select().single();
+  if (error) { if (eski) { store.gorevler.set(id, eski); bus.emit('gorev', { id }); } throw gorevHata(error); }
+  gorevKoy(data); bus.emit('gorev', { id });
+  if (eski?.tur === 'alim' && eski.firma_id && ['acik', 'iptal', 'reddedildi'].includes(durum)) {
+    const ff = store.firmalar.get(eski.firma_id);
+    if (ff && ff.arac_id === eski.arac_id) { store.firmalar.set(ff.id, { ...ff, arac_id: null }); bus.emit('firma', { id: ff.id }); }
+  }
+  return data;
+}
+// Ajan akışına (komuta ekranı) bir satır. Araç yöneticisi yalnız 'arac_asistani' adıyla yazabilir (RLS). Yazılamazsa iş durmaz.
+// ozet komuta ekranına gider: içine telefon, adres, oy sınıfı, plaka, kişi adı YAZILMAZ (ayrıntı veri alanına).
+export async function ajanOlayYaz(o) {
+  const satir = { ajan: 'arac_asistani', onem: 'bilgi', ...o };
+  if (gorevMotoru) return gorevMotoru.ajanOlayYaz(satir);
+  if (!['yonetici', 'bot', 'arac_yoneticisi'].includes(store.ben?.rol) || !navigator.onLine) return null;
+  const { data, error } = await sb.from('ajan_olaylari').insert(satir).select().single();
+  if (error) { console.warn('ajan olayı yazılamadı', error.message); return null; }
+  if (data && !store.ajanOlaylari.some(x => x.id === data.id)) store.ajanOlaylari.unshift(data);
+  bus.emit('ajan_olay', { olay: data }); return data;
+}
+// Atamasız araç talebi: kişi "Alınacak" listesine girer (kapanmamış görevi varsa o döner, ikinci görev açılmaz).
+export async function alimTalebiAc(firmaId, { aciliyet = 'normal', not = null, sebep = null } = {}) {
+  const var_ = firmaAcikGorev(firmaId); if (var_) return var_;
+  if (gorevMotoru) return gorevMotoru.alimTalebiAc(firmaId, { aciliyet, not, sebep });
+  const { data, error } = await sb.from('gorevler').insert({ tur: 'alim', firma_id: firmaId, aciliyet, notlar: not, sebep, nereye: store.ayarlar.secim?.yer || null }).select().single();
+  if (error) throw gorevHata(error);
+  gorevKoy(data); bus.emit('gorev', { id: data.id }); return data;
+}
