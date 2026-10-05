@@ -27,6 +27,7 @@ export const KOMITELER = {
     tema: 'kirmizi', renk: '#C8102E',
     onek: 'secim',                         // depolama anahtarları 1 Ekim'deki gibi ('secim-masasi-oturum' ...)
     kanal: 'secim-masasi',                 // realtime kanal adı
+    parolaEk: '-72k',                      // auth parolası 'pin-' + PIN + parolaEk (72'nin 33 hesabı bununla açıldı; DEĞİŞMEZ)
     supaUrl: `https://${REF_72}.supabase.co`,
     supaAnon: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhweGFlcnhybnp4dHJ2Y2NodnpqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3MjEyNjEsImV4cCI6MjEwNjI5NzI2MX0.U9KtlFEYOQ55saDUlwYF2yKssjB-VYrKiH2jaB4_HyY',
     manifest: 'manifest.webmanifest',
@@ -54,6 +55,7 @@ export const KOMITELER = {
     tema: 'turkuaz', renk: '#087F8C',
     onek: 'secim2627',
     kanal: 'secim2627-masasi',
+    parolaEk: '-2627k',                    // 26-27 projesinde giris_pin, edge yonetim ve hesap_ac.py ile aynı ek (secim-2627/sema)
     supaUrl: SUPA_2627_URL,
     supaAnon: SUPA_2627_ANON,
     manifest: 'manifest-2627.webmanifest',

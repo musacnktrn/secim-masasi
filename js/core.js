@@ -157,7 +157,7 @@ export async function pinSahibi(pin, ad = null) {
 }
 // pinSahibi'nden gelen kişiyle oturum aç (parolayı auth doğrular)
 export async function pinleGir(eposta, pin) {
-  const { error } = await sb.auth.signInWithPassword({ email: eposta, password: `pin-${pin}-72k` });
+  const { error } = await sb.auth.signInWithPassword({ email: eposta, password: `pin-${pin}${KOMITE.parolaEk}` });
   if (error) throw new Error('PIN hatalı');
   await profilYukle();
   sb.rpc('giris_kaydet').then(() => {});
@@ -165,7 +165,7 @@ export async function pinleGir(eposta, pin) {
 }
 export async function girisYap(ad, pin) {
   const ara = async (pAd) => (await pinSahibi(pin, pAd)).eposta;
-  const dene = async eposta => !(await sb.auth.signInWithPassword({ email: eposta, password: `pin-${pin}-72k` })).error;
+  const dene = async eposta => !(await sb.auth.signInWithPassword({ email: eposta, password: `pin-${pin}${KOMITE.parolaEk}` })).error;
   let tamam = await dene(await ara(ad));
   if (!tamam && ad) tamam = await dene(await ara(null));   // ad başka birine denk geldiyse yalnız PIN'le bir kez daha dene
   if (!tamam) throw new Error('PIN hatalı');
