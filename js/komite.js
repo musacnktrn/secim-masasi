@@ -6,14 +6,14 @@
 // anahtarları (oturumlar korunur) ve Supabase adresi aynı kalır.
 // Bu dosya core.js'i içe AKTARMAZ (giriş merkezi Supabase istemcisi kurulmadan çizilebilsin diye).
 
-export const SURUM = 'v9';            // sw.js CACHE ('secim-v9') ile birlikte artırılır; ekranın köşesinde "v9 · 2627" görünür
+export const SURUM = 'v10';            // sw.js CACHE ('secim-v9') ile birlikte artırılır; ekranın köşesinde "v9 · 2627" görünür
 
 // ---------------------------------------------------------------- 26-27 Supabase projesi
 // Musa projeyi açınca YALNIZ bu iki satır doldurulur (Project Settings > API: Project URL ve anon / publishable anahtar).
 // Dolana kadar 26-27 giriş ekranı "Veritabanı kurulumu sürüyor" der, hiçbir yere bağlanmaz.
 export const KURULUM_BEKLIYOR = 'KURULUM_BEKLIYOR';
-const SUPA_2627_URL = KURULUM_BEKLIYOR;
-const SUPA_2627_ANON = KURULUM_BEKLIYOR;
+const SUPA_2627_URL = 'https://pjozkrswedmpwcxcgknv.supabase.co';
+const SUPA_2627_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqb3prcnN3ZWRtcHdjeGNna252Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyMTc3MDksImV4cCI6MjEwNjc5MzcwOX0.97SCF6oSIauN_n8umvfh6qqbtmobSKkevceVmCFPdzQ';  // anon (herkese açık) anahtar; yetki RLS'te
 
 const REF_72 = 'xpxaerxrnzxtrvcchvzj';   // 72. Komite projesi: 72 dışındaki seçim bu adrese ASLA bağlanmaz
 

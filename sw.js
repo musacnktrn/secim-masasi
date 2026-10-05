@@ -5,7 +5,7 @@
 // Yalnız bu sitenin kendi dosyalarına dokunur. Supabase (veri + canlı bağlantı), jsDelivr / unpkg (kütüphaneler),
 // Google Fonts ve harita karoları başka kökendendir; bu çalışan onları hiç görmez, tarayıcı normal yoluyla gider.
 
-const CACHE = 'secim-v9';          // kabuk listesi değişince sürümü artır: eski önbellek kendiliğinden silinir (js/komite.js SURUM ile aynı)
+const CACHE = 'secim-v10';          // kabuk listesi değişince sürümü artır: eski önbellek kendiliğinden silinir (js/komite.js SURUM ile aynı)
 const ONEK = 'secim-';             // yalnız bu uygulamanın önbelleklerini temizle
 const KOMITE_DEPO = 'secim-son-komite';   // son açılan seçim (bildirime dokununca doğru seçime dönmek için); sürümle silinmez
 const ZAMAN_ASIMI = 3500;          // saklı kopya varken ağı en çok bu kadar bekle (ms)
