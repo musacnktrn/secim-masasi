@@ -478,12 +478,15 @@ export async function aracDurumYap(id, durum) {
   const a = store.araclar.get(id); if (a) { store.araclar.set(id, { ...a, durum }); bus.emit('arac', { id }); }
   await yaz({ tur: 'arac_guncelle', id, alanlar: { durum } });
 }
-export async function konumGonder(aracId, lat, lon, dogruluk = null, kaynak = 'telefon') {
-  const a = store.araclar.get(aracId); if (a) { store.araclar.set(aracId, { ...a, son_lat: lat, son_lon: lon, son_konum_zamani: new Date().toISOString(), son_konum_kaynak: kaynak }); bus.emit('arac', { id: aracId }); }
-  await yaz({ tur: 'konum', satir: { arac_id: aracId, lat, lon, dogruluk, kaynak } });
+// kaynak: 'telefon' (GPS) · 'sozlu' (şoför söyledi) · 'ilce' (yalnız ilçe biliniyor). dogruluk metre (tahmini konum dairesinin tabanı).
+// metin: sözlü konumun kendisi ("Karşıyaka çarşı"); yalnız doluysa gönderilir (72'nin arac_konumlari tablosunda bu sütun yok).
+export async function konumGonder(aracId, lat, lon, dogruluk = null, kaynak = 'telefon', metin = null) {
+  const a = store.araclar.get(aracId);
+  if (a) { store.araclar.set(aracId, { ...a, son_lat: lat, son_lon: lon, son_konum_zamani: new Date().toISOString(), son_konum_kaynak: kaynak, son_dogruluk: dogruluk ?? null, konum_kaynak: kaynak, konum_metni: metin || null }); bus.emit('arac', { id: aracId }); }
+  await yaz({ tur: 'konum', satir: { arac_id: aracId, lat, lon, dogruluk, kaynak, ...(metin ? { konum_metni: metin } : {}) } });
 }
 export async function aracKonumlari(aracId, dakikaGeri = 60) {
-  const { data } = await sb.from('arac_konumlari').select('lat, lon, zaman').eq('arac_id', aracId).gte('zaman', new Date(Date.now() - dakikaGeri * 60000).toISOString()).order('zaman');
+  const { data } = await sb.from('arac_konumlari').select('lat, lon, zaman, dogruluk, kaynak').eq('arac_id', aracId).gte('zaman', new Date(Date.now() - dakikaGeri * 60000).toISOString()).order('zaman');
   return data || [];
 }
 export async function ayarYaz(anahtar, deger) {

@@ -3,13 +3,15 @@
 // iz çizgileri (aracKonumlari), takip/odak aracın numaralı durakları + kalan rota (kesik kırmızı), FUAR İZMİR, Trafik, lejant, pin mini kartı.
 // Canlı olaylarda harita baştan kurulmaz: pin, çizgi ve araç ikonları yerinde güncellenir (titreme yok).
 // Başka ekrandan bağlantı: #harita/firma-<id> (pini açar) · #harita/arac-<id> (araca kilitlenir) · #harita/rota-<rota_kod>
+// 2026-10-05: TAHMİNİ KONUM DAİRESİ (aracın nerede olabileceği, zamanla büyür, yeni konumla küçülür) + "Konum gir"
+// (Admin / araç yöneticisi şoförün söylediği yeri haritaya dokunarak ya da yer adıyla girer). Bölüm: "tahmini konum dairesi".
 import {
-  store, esc, fmt, trBaslik, trArama, VARIS, gecikme, firmaAdi, firmaListesi,
+  store, bus, esc, fmt, trBaslik, trArama, VARIS, gecikme, firmaAdi, firmaListesi,
   aracKonumlari, aracKonum, firmaKonum, kalanSure, sayac, yazabilirMi,
-  isaretleyebilirMi, karsiladim, referansBenMi,
+  isaretleyebilirMi, karsiladim, referansBenMi, konumGonder, simdi,
 } from '../core.js';
 import { el, kisiKartiAc, toast } from '../ui.js';
-import { anahtar } from '../komite.js';
+import { anahtar, KOMITE } from '../komite.js';
 
 // ---------------------------------------------------------------- sabitler
 // ALTLIK: CARTO Positron / dark_all 2026-09-30 itibarıyla anahtar istiyor (her karo "API KEY REQUIRED" görseli). Anahtar gelene kadar
@@ -34,6 +36,18 @@ const GUNLER = [
 const GUN_ETIKET = { bekliyor: 'Bekliyor', arandi: 'Arandı', yolda: 'Yolda', fuarda: 'Fuarda', oy_kullandi: '✓ OY KULLANDI' };
 const GUN_RENK = { bekliyor: 'var(--ink-3)', arandi: 'var(--blue)', yolda: 'var(--amber)', fuarda: 'var(--violet)', oy_kullandi: 'var(--green)' };
 const ARAC_ETIKET = { hazir: 'Hazır', yolda: 'Yolda', fuarda: 'Fuarda', mola: 'Mola', arizali: '✕ Arızalı' };
+// tahmini konum dairesi: yarıçap = doğruluk (yoksa kaynağa göre taban) + geçen dakika × 500 m (30 km/sa), üst sınır 6 km
+const DAIRE_TABAN_M = { gps: 50, sozlu: 800, ilce: 2500 };
+const DAIRE_HIZ_M_DK = 500;
+const DAIRE_TAVAN_M = 6000;
+const DAIRE_ARALIK_MS = 15000;   // daireler 15 sn'de bir yeniden hesaplanır (sayfa yenilemeden büyür)
+const YAKIN_M = 3000;            // merkezi Fuar'a bundan yakın araç "Fuar'a yaklaşıyor" (parlak vurgu)
+const YAKIN_ETA_DK = 5;          // ya da tahmini varışı 5 dk ya da daha az
+const BUYUMEYEN = ['fuarda', 'mola', 'arizali'];   // duran araçta daire büyümez, yaklaşma vurgusu yok
+// Konum gir: yer adı araması (OpenStreetMap Nominatim, istemciden; saniyede en çok 1 istek, yalnız Bul'a basınca)
+const YER_ARA_URL = 'https://nominatim.openstreetmap.org/search';
+const IZMIR_KUTU = '26.20,39.45,28.55,37.75';   // İzmir ili: sol, üst, sağ, alt
+const KG_DOGRULUK = [{ m: 300, ad: 'Tam yer' }, { m: 800, ad: 'Semt' }, { m: 2500, ad: 'İlçe' }];
 
 // ---------------------------------------------------------------- ekran durumu
 let L = null;                    // window.L (Leaflet 1.9.4)
@@ -132,6 +146,107 @@ function aracRotaYazi(d) {
 }
 const sureYazi = s => (s ? `~${s.dk} dk · ${kmYaz(s.km)} km` : 'alınamadı');
 
+// ---------------------------------------------------------------- tahmini konum dairesi
+// Şoför konumunu söyleyince ya da telefon GPS'i gelince aracın ŞU AN nerede olabileceği bir daireyle gösterilir.
+// Yarıçap = son konumun doğruluğu (araclar.son_dogruluk; yoksa kaynağa göre GPS 50 m, sözlü 800 m, ilçe 2,5 km)
+//         + son konumdan beri geçen dakika × 500 m (30 km/sa varsayımı), üst sınır 6 km.
+// Merkez son bilinen konumda kalır: aracın Fuar'a doğru ilerlediği VARSAYILMAZ, daire yalnız büyür; yeni konum gelince küçülür.
+// Fuarda, molada ya da arızalı araçta büyüme yok. Sözlü / ilçe kaynaklı daire kesik çizgili, GPS ince.
+// Renk token'dan (--red): 72'de kırmızı, 26-27'de turkuaz. Fuar'a yaklaşan araç --marka-parlak ile parlar.
+const metreYaz = m => {
+  if (!Number.isFinite(m)) return '?';
+  if (m < 1000) return `${m < 100 ? Math.round(m) : Math.round(m / 10) * 10} m`;
+  return `${kmYaz((m / 1000).toFixed(1).replace(/\.0$/, ''))} km`;
+};
+const konumGirebilir = () => !!KOMITE.konumGir && ['yonetici', 'arac_yoneticisi'].includes(store.ben?.rol);
+function konumKaynagi(a) {
+  const k = trArama(a?.konum_kaynak || a?.son_konum_kaynak || 'telefon');
+  if (k === 'telefon' || k === 'gps') return { tur: 'gps', yazi: 'GPS' };
+  if (k === 'ilce') return { tur: 'ilce', yazi: 'şoför söyledi (ilçe)' };
+  if (k === 'elle') return { tur: 'sozlu', yazi: 'haritada işaretlendi' };
+  return { tur: 'sozlu', yazi: 'şoför söyledi' };
+}
+// doğruluk: araclar.son_dogruluk (26-27 şeması); yoksa (72) izin son satırı aynı konumsa onun doğruluğu
+function aracDogruluk(a) {
+  if (sayiMi(a.son_dogruluk)) return Number(a.son_dogruluk);
+  const son = S?.izler.get(a.id)?.son;
+  if (son && sayiMi(son.dogruluk) && a.son_konum_zamani && Math.abs(new Date(son.zaman) - new Date(a.son_konum_zamani)) < 5000) return Number(son.dogruluk);
+  return null;
+}
+// tahmini varış: eta_zaman (yazıldığı anda now()+eta_dk) varsa ondan kalan dakika; çok eskiyse yok sayılır
+function kalanEtaDk(a) {
+  if (a.eta_zaman) { const d = (new Date(a.eta_zaman).getTime() - Date.now()) / 60000; return Number.isFinite(d) && d > -10 ? Math.max(0, Math.round(d)) : null; }
+  return sayiMi(a.eta_dk) ? Number(a.eta_dk) : null;
+}
+const fuaraMesafeM = a => { const v = varis(); return mesafeM([Number(a.son_lat), Number(a.son_lon)], [v.lat, v.lon]); };
+function fuaraYaklasiyor(a) {
+  if (!aracKonumlu(a) || BUYUMEYEN.includes(a.durum)) return false;
+  if (fuaraMesafeM(a) < YAKIN_M) return true;
+  const eta = kalanEtaDk(a); return eta != null && eta <= YAKIN_ETA_DK;
+}
+function daireBilgi(a) {
+  const kaynak = konumKaynagi(a);
+  const dogruluk = aracDogruluk(a);
+  const taban = Math.max(10, dogruluk ?? DAIRE_TABAN_M[kaynak.tur]);
+  const yas = konumYasiDk(a);
+  const buyume = BUYUMEYEN.includes(a.durum) ? 0 : Number.isFinite(yas) ? DAIRE_HIZ_M_DK * Math.max(0, yas) : Infinity;
+  const r = Math.min(DAIRE_TAVAN_M, taban + buyume);
+  return { kaynak, dogruluk, taban, r: Math.round(r), tavan: r >= DAIRE_TAVAN_M, yakin: fuaraYaklasiyor(a) };
+}
+// "~4 dk kaldı" ya da "2,1 km kaldı" (tahmini varış yoksa kuş uçuşu uzaklık)
+function yaklasanMetni(a) {
+  const eta = kalanEtaDk(a);
+  return eta != null ? `~${eta} dk kaldı` : `${metreYaz(fuaraMesafeM(a))} kaldı`;
+}
+// konumun saati uygulama saatine göre (?saat= provasında da tutarlı; normalde son_konum_zamani'nın kendisi)
+const konumSaati = a => (a.son_konum_zamani ? fmt.saat(new Date(simdi().getTime() - (Date.now() - new Date(a.son_konum_zamani).getTime()))) : 'saat ?');
+function dairePopupHtml(id) {
+  const a = store.araclar.get(id);
+  if (!a || !aracKonumlu(a)) return '<div class="hp"><div class="hp-zayif">Bu araçtan konum yok.</div></div>';
+  const b = daireBilgi(a);
+  const saat = konumSaati(a);
+  const yas = a.son_konum_zamani ? fmt.goreli(a.son_konum_zamani) : 'zamanı bilinmiyor';
+  const ana = `Tahmini konum · ${b.kaynak.yazi} ${saat} · ±${metreYaz(b.taban)} · ${yas}`;
+  const buyudu = BUYUMEYEN.includes(a.durum) ? 'Araç duruyor, daire büyümüyor.'
+    : b.r > b.taban + 5 ? `Daire şimdi ±${metreYaz(b.r)}${b.tavan ? ' (üst sınır)' : ''}. Son konumdan beri dakikada 500 m büyüyor, yeni konum gelince küçülür.` : '';
+  return `<div class="hp">
+    <div class="hp-ust"><div class="hp-baslik"><div class="hp-ad">${esc(fmt.plaka(a.plaka))}</div><div class="hp-firma">${esc(soforKisa(a.sofor_ad) || 'Şoför yok')} · ${esc(ARAC_ETIKET[a.durum] || a.durum || '')}</div></div><button type="button" class="hp-kapat" data-pop-kapat aria-label="Kapat">×</button></div>
+    <div class="hd-ana">${esc(ana)}</div>
+    ${a.konum_metni ? `<div class="hp-not hd-metin">“${esc(a.konum_metni)}”</div>` : ''}
+    ${b.yakin ? `<div class="hp-not hd-yakin"><b>Fuar'a yaklaşıyor</b> · ${esc(yaklasanMetni(a))}</div>` : ''}
+    ${buyudu ? `<div class="hp-zayif">${esc(buyudu)}</div>` : ''}
+    ${konumGirebilir() ? `<div class="hp-eylem"><button type="button" class="hp-kart" data-konum-gir="${a.id}">Yeni konum gir</button></div>` : ''}
+  </div>`;
+}
+// daireler yerinde güncellenir (yarıçap, merkez, sınıf); konumu olmayan aracın dairesi kalkar
+function dairelerEsitle() {
+  const gorulen = new Set(); let yaklasan = false;
+  for (const a of store.araclar.values()) {
+    if (!aracKonumlu(a)) continue;
+    gorulen.add(a.id);
+    const b = daireBilgi(a); const ll = [Number(a.son_lat), Number(a.son_lon)];
+    if (b.yakin) yaklasan = true;
+    let d = S.daireler.get(a.id);
+    if (!d) {
+      const id = a.id;
+      const c = L.circle(ll, { radius: b.r, className: 'harita-daire', interactive: true, bubblingMouseEvents: true });
+      d = { c, r: b.r, cls: '', popupHtml: '' };
+      c.bindPopup(() => (d.popupHtml = dairePopupHtml(id)), { ...POPUP_SECENEK, offset: [0, -2] });
+      S.katman.daire.addLayer(c); c.bringToBack();   // iz ve rota çizgileri dairenin üstünde kalsın
+      S.daireler.set(a.id, d);
+    } else {
+      const e = d.c.getLatLng(); if (e.lat !== ll[0] || e.lng !== ll[1]) d.c.setLatLng(ll);
+      if (d.r !== b.r) { d.r = b.r; d.c.setRadius(b.r); }
+    }
+    const cls = `k-${b.kaynak.tur}${b.yakin ? ' yakin' : ''}${b.tavan ? ' tavan' : ''}${hedefArac() === a.id ? ' odak' : ''}`;
+    const pe = d.c.getElement();
+    if (pe && d.cls !== cls) { pe.setAttribute('class', `harita-daire leaflet-interactive ${cls}`); d.cls = cls; }
+    if (d.c.isPopupOpen()) { const h = dairePopupHtml(a.id); if (h !== d.popupHtml) { d.popupHtml = h; popupIcerik(d.c, h); } }
+  }
+  for (const [id, d] of S.daireler) if (!gorulen.has(id)) { S.katman.daire.removeLayer(d.c); S.daireler.delete(id); }
+  S.yaklasanVar = yaklasan;
+}
+
 // ---------------------------------------------------------------- popup ve ipucu içerikleri
 function ipucuHtml(id) {
   const f = store.firmalar.get(id); if (!f) return '';
@@ -219,10 +334,12 @@ function aracIkonGuncelle(k, a) {
   const { e, plaka, sofor, yas, ok } = k.r; const v = varis();
   const eski = eskiMi(a), odak = hedefArac() === a.id;
   const yakin = Math.hypot(Number(a.son_lat) - v.lat, Number(a.son_lon) - v.lon) < FUARA_YAKIN;
-  const etiketli = odak || !!S.takip || !yakin;
-  const cls = `harita-arac st-${a.durum || 'hazir'}${eski ? ' eski' : ''}${odak ? ' odak' : ''}${etiketli ? '' : ' etiketsiz'}`;
+  const yaklasan = fuaraYaklasiyor(a);   // Fuar'a yaklaşan (duran değil): etiketi görünür, parlak halka
+  const etiketli = odak || !!S.takip || !yakin || yaklasan;
+  const cls = `harita-arac st-${a.durum || 'hazir'}${eski ? ' eski' : ''}${odak ? ' odak' : ''}${etiketli ? '' : ' etiketsiz'}${yaklasan ? ' yakin' : ''}`;
   if (e.className !== cls) e.className = cls;
-  const pl = fmt.plaka(a.plaka), so = soforKisa(a.sofor_ad), ya = eski ? `konum eski · ${fmt.goreli(a.son_konum_zamani)}` : fmt.goreli(a.son_konum_zamani);
+  const yasYazi = eski ? `konum eski · ${fmt.goreli(a.son_konum_zamani)}` : fmt.goreli(a.son_konum_zamani);
+  const pl = fmt.plaka(a.plaka), so = soforKisa(a.sofor_ad), ya = yaklasan ? `Fuar'a ${yaklasanMetni(a).replace(' kaldı', '')} · ${yasYazi}` : yasYazi;
   if (plaka.textContent !== pl) plaka.textContent = pl;
   if (sofor.textContent !== so) sofor.textContent = so;
   if (yas.textContent !== ya) yas.textContent = ya;
@@ -270,6 +387,7 @@ function esitleIc() {
   const kume = kumeHesapla();
   pinleriEsitle(kume);
   aracleriEsitle();
+  dairelerEsitle();
   cizgileriEsitle(kume);
   if (S.varisM) {
     const v = varis(); const e = S.varisM.getLatLng();
@@ -369,6 +487,7 @@ async function izCek(id) {
     const satirlar = await aracKonumlari(id, IZ_DK);
     if (S !== s) return;
     iz.ll = satirlar.filter(n => sayiMi(n.lat) && sayiMi(n.lon)).map(n => [Number(n.lat), Number(n.lon)]);
+    iz.son = satirlar[satirlar.length - 1] || null;   // son satırın doğruluğu: araclar.son_dogruluk yoksa daire tabanı
   } catch (e) { console.warn('iz', e); }
   finally { iz.bekle = false; iz.cek = Date.now(); }
   if (S !== s) return;
@@ -598,13 +717,27 @@ function aracKart(a) {
     <div class="hk-a1">${plaka}<span class="hk-sofor">${esc(soforKisa(a.sofor_ad) || 'Şoför yok')}</span><span class="hk-vst vst-${esc(a.durum)}">${esc(ARAC_ETIKET[a.durum] || a.durum)}</span></div>
     <div class="hk-a2">${esc(aracRotaYazi(d))}</div>
     <div class="hk-a3"><span class="hk-sira">Sıradaki: <b>${esc(sonraki)}</b></span><span class="hk-ping${eski ? ' eski' : ''}">◎ ${esc(ping)}</span></div>
+    ${konum ? tahminSatiri(a) : ''}
     ${takip ? sureSatiri(a) : ''}
     <div class="hk-a4">
       <button type="button" class="hk-takip${takip ? ' acik' : ''}" data-takip="${a.id}" ${konum ? '' : 'disabled title="Henüz konum gelmedi"'}>${takip ? '✓ Takipte' : '◎ Takip et'}</button>
       ${yazabilirMi() ? `<button type="button" class="hk-kart" data-arac-kart="${a.id}">Araç kartı</button>` : ''}
+      ${konumGirebilir() ? `<button type="button" class="hk-kart" data-konum-gir="${a.id}" title="Şoförün söylediği yeri haritaya gir">Konum gir</button>` : ''}
       ${tel}
     </div>
   </div>`;
+}
+// araç kartında tahmini konum özeti: sözlü / ilçe kaynakta ya da Fuar'a yaklaşırken (GPS'te ve yaklaşmıyorsa satır yok)
+function tahminSatiri(a) {
+  const b = daireBilgi(a);
+  if (b.kaynak.tur === 'gps' && !b.yakin) return '';
+  const parca = [];
+  if (b.yakin) parca.push(`<b>Fuar'a yaklaşıyor</b> · ${esc(yaklasanMetni(a))}`);
+  if (b.kaynak.tur !== 'gps') {
+    parca.push(`${esc(b.kaynak.yazi)}${a.son_konum_zamani ? ' ' + esc(konumSaati(a)) : ''}${a.konum_metni ? ` · “${esc(a.konum_metni)}”` : ''}`);
+    parca.push(`şimdi ±${esc(metreYaz(b.r))}`);
+  }
+  return `<div class="hk-tahmin${b.yakin ? ' yakin' : ''}" title="Tahmini konum dairesi: zamanla büyür, yeni konum gelince küçülür"><span class="hk-tahmin-ic" aria-hidden="true"></span><span>${parca.join(' · ')}</span></div>`;
 }
 function sureSatiri(a) {
   const s = S.sure;
@@ -614,7 +747,9 @@ function sureSatiri(a) {
 function lejantCiz() {
   const say = {}; firmaListesi().filter(konumlu).forEach(f => { say[f.durum] = (say[f.durum] || 0) + 1; });
   const html = GUNLER.map(g => `<button type="button" class="hl${gizliDurumlar.has(g.k) ? ' kapali' : ''}" data-lj="${g.k}" title="${gizliDurumlar.has(g.k) ? 'Göster' : 'Gizle'}: ${esc(g.ad)} (${say[g.k] || 0} durak)"><span class="hl-nokta" style="background:${GUN_RENK[g.k]}"></span>${esc(g.ad)}</button>`).join('')
-    + '<span class="hl sabit"><span class="hl-arac"></span>Araç</span><span class="hl sabit"><span class="hl-not"></span>Saha notu</span>';
+    + '<span class="hl sabit"><span class="hl-arac"></span>Araç</span><span class="hl sabit"><span class="hl-not"></span>Saha notu</span>'
+    + (S.daireler.size ? '<span class="hl sabit" title="Aracın şu an olabileceği alan: zamanla büyür, yeni konum gelince küçülür. Kesik çizgi = şoför söyledi"><span class="hl-daire"></span>Tahmini konum</span>' : '')
+    + (S.yaklasanVar ? '<span class="hl sabit"><span class="hl-daire yakin"></span>Fuar\'a yaklaşan</span>' : '');
   if (html !== S.lejantHtml) { S.lejant.innerHTML = html; S.lejantHtml = html; }
 }
 function takipCiz() {
@@ -631,6 +766,129 @@ function sekmeYap(s) {
   S.ara.placeholder = S.sekme === 'araclar' ? 'Plaka ya da şoför ara' : 'Rota, referans, ilçe ya da kişi ara';
   S.panelHtml = null; S.liste.scrollTop = 0;
   panelCiz();
+}
+
+// ---------------------------------------------------------------- Konum gir (şoförün sözlü konumu)
+// Admin ve araç yöneticisi: araç seç, şoförün söylediği yeri yaz ve Bul (Nominatim) ya da haritada o noktaya dokun,
+// ne kadar kesin olduğunu seç (Tam yer ±300 m · Semt ±800 m · İlçe ±2,5 km), Kaydet. arac_konumlari'na kaynak 'sozlu'
+// (ilçede 'ilce'), dogruluk ve konum_metni ile yazılır; tetikleyici aracın son konumunu günceller, daire oradan büyür.
+const kgDogrulukHtml = () => KG_DOGRULUK.map(d => `<button type="button" class="hkg-dog-b" data-kg-dog="${d.m}" role="radio" aria-checked="false">${esc(d.ad)}<small>±${esc(metreYaz(d.m))}</small></button>`).join('');
+function kgKur() {
+  const p = el(`<div class="hkg" data-kg hidden role="dialog" aria-label="Şoförün söylediği konumu gir">
+    <div class="hkg-ust"><b>Konum gir</b><select class="hkg-arac" data-kg-arac aria-label="Araç"></select><button type="button" class="hp-kapat" data-kg-kapat aria-label="Kapat">×</button></div>
+    <form class="hkg-ara" data-kg-form autocomplete="off"><input type="search" data-kg-q enterkeyhint="search" placeholder="Yer adı (ör. Karşıyaka çarşı)" aria-label="Şoförün söylediği yer"><button type="submit" data-kg-bul>Bul</button></form>
+    <div class="hkg-sonuc" data-kg-sonuc></div>
+    <div class="hkg-ipucu">ya da haritada o noktaya dokun</div>
+    <div class="hkg-dog" role="radiogroup" aria-label="Ne kadar kesin?">${kgDogrulukHtml()}</div>
+    <div class="hkg-alt"><span class="hkg-nokta" data-kg-nokta>Henüz nokta seçilmedi</span><button type="button" class="hkg-kaydet" data-kg-kaydet disabled>Kaydet</button></div>
+  </div>`);
+  S.kap.appendChild(p);
+  L.DomEvent.disableClickPropagation(p); L.DomEvent.disableScrollPropagation(p);
+  const q = s => p.querySelector(s);
+  S.kgP = { p, arac: q('[data-kg-arac]'), q: q('[data-kg-q]'), bul: q('[data-kg-bul]'), sonuc: q('[data-kg-sonuc]'), nokta: q('[data-kg-nokta]'), kaydet: q('[data-kg-kaydet]') };
+  q('[data-kg-kapat]').addEventListener('click', kgKapat);
+  q('[data-kg-form]').addEventListener('submit', e => { e.preventDefault(); kgAra(); });
+  S.kgP.arac.addEventListener('change', () => { if (S?.kg) S.kg.aracId = Number(S.kgP.arac.value); });
+  S.kgP.q.addEventListener('input', () => { if (S?.kg) S.kg.metinElle = true; });
+  S.kgP.kaydet.addEventListener('click', kgKaydet);
+  p.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); kgKapat(); } });
+  p.addEventListener('click', e => {
+    const d = e.target.closest('[data-kg-dog]'); if (d) { kgDogrulukYap(Number(d.dataset.kgDog)); return; }
+    const s = e.target.closest('[data-kg-i]');
+    if (s && S.kg?.sonuclar) { const r = S.kg.sonuclar[Number(s.dataset.kgI)]; if (r) kgNokta(r.lat, r.lon, { ad: r.ad, dogruluk: r.dogruluk, yakinlas: true }); }
+  });
+}
+function konumGirAc(aracId) {
+  if (!S || !konumGirebilir()) return;
+  if (!S.kgP) kgKur();
+  const araclar = [...store.araclar.values()].sort((a, b) => fmt.plaka(a.plaka).localeCompare(fmt.plaka(b.plaka), 'tr', { numeric: true }));
+  if (!araclar.length) { toast('Kayıtlı araç yok', { tur: 'hata' }); return; }
+  const secili = store.araclar.has(aracId) ? aracId : araclar[0].id;
+  S.kgP.arac.innerHTML = araclar.map(a => `<option value="${a.id}"${a.id === secili ? ' selected' : ''}>${esc(fmt.plaka(a.plaka))}${a.sofor_ad ? ' · ' + esc(soforKisa(a.sofor_ad)) : ''}</option>`).join('');
+  S.kg = { aracId: secili, nokta: null, ad: '', dogruluk: 800, sonuclar: null, metinElle: false };
+  S.kgP.q.value = ''; S.kgP.sonuc.innerHTML = ''; S.kgP.nokta.textContent = 'Henüz nokta seçilmedi'; S.kgP.kaydet.disabled = true;
+  kgDogrulukYap(800);
+  S.kgP.p.hidden = false; S.kap.classList.add('kg-acik');
+  S.map.closePopup();
+  if (!matchMedia('(max-width: 760px)').matches) S.kgP.q.focus();   // telefonda klavye kendiliğinden açılmasın
+}
+function kgKapat() {
+  if (!S) return;
+  S.kg = null;
+  if (S.kgP) S.kgP.p.hidden = true;
+  S.kap.classList.remove('kg-acik');
+  for (const k of ['kgOnizleme', 'kgMerkez']) if (S[k]) { S.map.removeLayer(S[k]); S[k] = null; }
+}
+function kgDogrulukYap(m) {
+  if (!S?.kg) return;
+  S.kg.dogruluk = m;
+  S.kgP.p.querySelectorAll('[data-kg-dog]').forEach(b => { const on = Number(b.dataset.kgDog) === m; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+  if (S.kgOnizleme) S.kgOnizleme.setRadius(m);
+}
+// seçilen nokta: önizleme dairesi (kesik) + merkez noktası; aramadan geldiyse doğruluk sonucun türünden
+function kgNokta(lat, lon, { ad = '', dogruluk = null, yakinlas = false } = {}) {
+  if (!S?.kg) return;
+  S.kg.nokta = { lat, lon }; S.kg.ad = ad;
+  if (dogruluk) kgDogrulukYap(dogruluk);
+  const ll = [lat, lon];
+  if (!S.kgOnizleme) {
+    S.kgOnizleme = L.circle(ll, { radius: S.kg.dogruluk, className: 'harita-daire k-sozlu onizleme', interactive: false }).addTo(S.map);
+    S.kgMerkez = L.circleMarker(ll, { radius: 6, className: 'harita-kg-merkez', interactive: false }).addTo(S.map);
+  } else { S.kgOnizleme.setLatLng(ll); S.kgOnizleme.setRadius(S.kg.dogruluk); S.kgMerkez.setLatLng(ll); }
+  if (yakinlas) S.map.fitBounds(S.kgOnizleme.getBounds(), { paddingTopLeft: [40, 60], paddingBottomRight: [40, 60], maxZoom: 15, animate: true });
+  S.kgP.nokta.textContent = ad ? `Seçilen: ${ad}` : `Haritada işaretlenen nokta (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+  S.kgP.kaydet.disabled = false;
+}
+const YER_AT = new Set(['izmir', 'turkiye', 'ege bolgesi']);
+const kisaYer = s => [...new Set(String(s || '').split(',').map(x => x.trim()).filter(x => x && !YER_AT.has(trArama(x)) && !/^\d{5}$/.test(x)))].slice(0, 3).join(', ');
+// Nominatim place_rank (İzmir'de ölçüldü): ilçe sınırı 12 -> ilçe düzeyi; mahalle / OSB 16 -> semt; cadde, istasyon, bina 26-30 -> tam yer
+const rankDogruluk = r => (!Number.isFinite(Number(r)) ? 800 : Number(r) <= 14 ? 2500 : Number(r) >= 26 ? 300 : 800);
+async function kgAra() {
+  if (!S?.kg) return;
+  const metin = S.kgP.q.value.trim();
+  if (metin.length < 2) { S.kgP.sonuc.innerHTML = '<div class="hkg-bos">En az 2 harf yaz.</div>'; return; }
+  const gecen = Date.now() - (S.kgSonArama || 0);
+  if (gecen < 1100) return;   // Nominatim kuralı: saniyede en çok bir istek
+  S.kgSonArama = Date.now();
+  const sn = S; sn.kgP.bul.disabled = true; sn.kgP.sonuc.innerHTML = '<div class="hkg-bos">Aranıyor…</div>';
+  try {
+    const u = `${YER_ARA_URL}?${new URLSearchParams({ q: metin, format: 'jsonv2', countrycodes: 'tr', 'accept-language': 'tr', limit: '6', viewbox: IZMIR_KUTU, bounded: '1' })}`;
+    const r = await fetch(u, { headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error(`yer araması yanıt vermedi (${r.status})`);
+    const j = await r.json();
+    if (S !== sn || !sn.kg) return;
+    const liste = (Array.isArray(j) ? j : []).map(x => ({ lat: Number(x.lat), lon: Number(x.lon), ad: kisaYer(x.display_name) || metin, dogruluk: rankDogruluk(x.place_rank) }))
+      .filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon));
+    sn.kg.sonuclar = liste;
+    sn.kgP.sonuc.innerHTML = liste.length
+      ? liste.map((x, i) => `<button type="button" class="hkg-s" data-kg-i="${i}"><span>${esc(x.ad)}</span><small>±${esc(metreYaz(x.dogruluk))}</small></button>`).join('')
+      : '<div class="hkg-bos">İzmir içinde bulunamadı. Haritada o noktaya dokunabilirsin.</div>';
+    if (liste.length === 1) kgNokta(liste[0].lat, liste[0].lon, { ad: liste[0].ad, dogruluk: liste[0].dogruluk, yakinlas: true });
+  } catch (e) {
+    if (S === sn && sn.kg) sn.kgP.sonuc.innerHTML = `<div class="hkg-bos">Yer araması şu an çalışmıyor (${esc(String(e?.message || e))}). Haritada o noktaya dokunabilirsin.</div>`;
+  } finally { if (S === sn && sn.kgP) setTimeout(() => { if (S === sn) sn.kgP.bul.disabled = false; }, 1100); }
+}
+async function kgKaydet() {
+  const kg = S?.kg; if (!kg?.nokta) return;
+  const aracId = Number(S.kgP.arac.value); const a = store.araclar.get(aracId);
+  if (!a) { toast('Araç bulunamadı', { tur: 'hata' }); return; }
+  const metin = (S.kgP.q.value.trim() || kg.ad || '').slice(0, 200) || null;
+  const kaynak = kg.dogruluk >= 2500 ? 'ilce' : 'sozlu';
+  const onceki = a; const sn = S;
+  sn.kgP.kaydet.disabled = true;
+  try {
+    await konumGonder(aracId, Number(kg.nokta.lat.toFixed(6)), Number(kg.nokta.lon.toFixed(6)), kg.dogruluk, kaynak, metin);
+    toast(`${fmt.plaka(a.plaka)} · tahmini konum girildi (±${metreYaz(kg.dogruluk)})`);
+    if (S !== sn) return;
+    kgKapat();
+    if (S.takip !== aracId) { S.odakArac = aracId; S.seciliRota = null; }
+    esitle(); aracKartiGoster(aracId);
+  } catch (e) {
+    store.araclar.set(aracId, onceki); bus.emit('arac', { id: aracId });   // iyimser güncellemeyi geri al
+    if (S === sn && sn.kgP) sn.kgP.kaydet.disabled = false;
+    const m = String(e?.message || e);
+    toast(/row-level security|permission denied/i.test(m) ? 'Konum yazılamadı: bu işlem için yetkin yok' : `Konum yazılamadı: ${m}`, { tur: 'hata' });
+  }
 }
 
 // ---------------------------------------------------------------- ekran
@@ -671,6 +929,7 @@ export default {
       pinler: new Map(), aracM: new Map(), izler: new Map(), rotalar: [], rotaMap: new Map(),
       seciliRota: null, odakArac: null, takip: null, seciliKisi: null, sure: null, sureBekle: false,
       panelHtml: null, lejantHtml: null, trafikImza: null, takipHtml: null, varisHtml: '', yakinlasiyor: false, kalanCizgi: null, kalanImza: '',
+      kap: q('.harita-kap'), daireler: new Map(), yaklasanVar: false, kg: null, kgP: null, kgOnizleme: null, kgMerkez: null, kgSonArama: 0,
     };
 
     // harita + karo
@@ -687,7 +946,7 @@ export default {
       <a href="#" role="button" data-fuar title="Fuar İzmir'e git" aria-label="Fuar İzmir'e git">⚑</a>
     </div>`);
     new Kontrol({ position: 'topright', eleman: araKontrol }).addTo(map);
-    S.katman = { rota: L.layerGroup().addTo(map), iz: L.layerGroup().addTo(map), pin: L.layerGroup().addTo(map), arac: L.layerGroup().addTo(map) };
+    S.katman = { daire: L.layerGroup().addTo(map), rota: L.layerGroup().addTo(map), iz: L.layerGroup().addTo(map), pin: L.layerGroup().addTo(map), arac: L.layerGroup().addTo(map) };
 
     // ilk görünüm (işaretler eklenmeden önce: Leaflet görünüm kurulmadan katman çizmez)
     if (sonGorunum) map.setView(sonGorunum.merkez, sonGorunum.zoom, { animate: false });
@@ -700,12 +959,14 @@ export default {
     map.on('zoomstart', () => { if (!S) return; S.yakinlasiyor = true; S.aracM.forEach(k => k.m.getElement()?.classList.remove('kayiyor')); });
     map.on('zoomend', () => { if (S) S.yakinlasiyor = false; });
     map.on('moveend', () => { if (S && !S.seciliKisi && !hedefArac() && !S.seciliRota) trafikCiz(); });
+    map.on('click', e => { if (S?.kg) kgNokta(e.latlng.lat, e.latlng.lng); });   // Konum gir açıkken haritaya dokunmak noktayı seçer
     const kap = q('.harita-kap');
     kap.addEventListener('click', e => {
       if (!S) return;
       const ks = e.target.closest('[data-karsila]');
       if (ks) { e.preventDefault(); const id = Number(ks.dataset.karsila); ks.disabled = true; karsiladim(id).then(() => toast(`${firmaAdi(store.firmalar.get(id))} · karşıladın`), hata => { ks.disabled = false; toast(String(hata?.message || hata), { tur: 'hata' }); }); return; }
       const kart = e.target.closest('[data-kart]'); if (kart) { e.preventDefault(); kisiKartiAc(Number(kart.dataset.kart)); return; }
+      const kg = e.target.closest('[data-konum-gir]'); if (kg) { e.preventDefault(); konumGirAc(Number(kg.dataset.konumGir)); return; }
       if (e.target.closest('[data-pop-kapat]')) { map.closePopup(); return; }
       if (e.target.closest('[data-takip-birak]')) { takipBirak(); return; }
       const lj = e.target.closest('[data-lj]');
@@ -723,6 +984,7 @@ export default {
       if (e.target.closest('a[href]')) return;
       const tk = e.target.closest('[data-takip]'); if (tk) { e.stopPropagation(); if (!tk.disabled) takipDegistir(Number(tk.dataset.takip)); return; }
       const ak = e.target.closest('[data-arac-kart]'); if (ak) { location.hash = '#araclar/' + ak.dataset.aracKart; return; }
+      const kg = e.target.closest('[data-konum-gir]'); if (kg) { e.stopPropagation(); konumGirAc(Number(kg.dataset.konumGir)); return; }
       const d = e.target.closest('[data-durak]'); if (d) { kisiOdak(Number(d.dataset.durak)); return; }
       const r = e.target.closest('[data-rota]'); if (r) { rotaSec(r.dataset.rota); return; }
       const a = e.target.closest('[data-arac]'); if (a) aracOdak(Number(a.dataset.arac));
@@ -736,6 +998,7 @@ export default {
       if (e.key !== 'Escape' || !S || document.querySelector('[data-modal], .palet, .cekmece')) return;
       if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) && document.activeElement !== S.ara) return;
       if (S.kok.querySelector('.leaflet-popup')) { S.map.closePopup(); return; }   // önce açık popup kapanır
+      if (S.kg) { kgKapat(); return; }
       if (S.seciliRota || S.odakArac || S.takip) { odagiTemizle(); esitle(); }
     };
     document.addEventListener('keydown', S.escDinle, true);
@@ -756,6 +1019,8 @@ export default {
     if (S.takip) { const a = store.araclar.get(S.takip); map.setView([Number(a.son_lat), Number(a.son_lon)], map.getZoom(), { animate: false }); }
     paramUygula(param);
     requestAnimationFrame(() => S?.map.invalidateSize({ pan: false }));
+    // tahmini konum daireleri (ve konum yaşı yazıları) 15 sn'de bir yeniden hesaplanır: sayfa yenilemeden büyür
+    S.daireZaman = setInterval(() => { if (S) esitle(); }, DAIRE_ARALIK_MS);
   },
 
   yenile() {
@@ -769,6 +1034,7 @@ export default {
     const m = S.map;
     try { sonGorunum = { merkez: m.getCenter(), zoom: m.getZoom() }; } catch {}
     S.aracM.forEach(k => clearTimeout(k.kayZaman));
+    clearInterval(S.daireZaman);
     S.temaGozcu?.disconnect(); S.boyutGozcu?.disconnect();
     document.removeEventListener('keydown', S.escDinle, true);
     S = null;                                  // popupclose gibi olaylar temizlik sırasında boşa düşsün
@@ -993,6 +1259,64 @@ a.hp-bag:hover { background: var(--hover); }
 .hp-sayilar span { font-size: 11px; font-weight: 700; color: var(--ink-3); }
 .hp-zayif { color: var(--ink-3); font-size: 12px; font-weight: 600; }
 
+/* tahmini konum dairesi: renk token'dan (72 kırmızı, 26-27 turkuaz); sözlü/ilçe kesik çizgi + %12 dolgu, GPS ince */
+.harita-daire { stroke: var(--red); fill: var(--red); stroke-width: 2px; stroke-opacity: .9; fill-opacity: .12; stroke-dasharray: 12 8; }
+.harita-daire.k-gps { stroke-width: 1px; stroke-dasharray: none; stroke-opacity: .6; fill-opacity: .1; }
+.harita-daire.tavan { fill-opacity: .05; stroke-opacity: .45; }
+.harita-daire.odak { stroke-width: 2.5px; stroke-opacity: 1; }
+.harita-daire.yakin { stroke: var(--marka-parlak); fill: var(--marka-parlak); stroke-width: 3px; stroke-opacity: 1; fill-opacity: .2; animation: hdNabiz 1.6s ease-in-out infinite; }
+.harita-daire.onizleme { stroke-width: 2px; stroke-opacity: 1; fill-opacity: .16; }
+.harita-kg-merkez { stroke: #fff; stroke-width: 2px; fill: var(--red); fill-opacity: 1; }
+@keyframes hdNabiz { 0%, 100% { stroke-opacity: 1; } 50% { stroke-opacity: .35; } }
+.harita-arac.yakin .ha-ikon { animation: haNabiz 1.6s ease-in-out infinite; box-shadow: 0 0 0 3px var(--marka-parlak), 0 0 0 5px color-mix(in srgb, var(--marka-parlak) 45%, transparent), 0 4px 10px rgba(0, 0, 0, .35); }
+@keyframes haNabiz {
+  0%, 100% { box-shadow: 0 0 0 3px var(--marka-parlak), 0 0 0 5px color-mix(in srgb, var(--marka-parlak) 45%, transparent), 0 4px 10px rgba(0, 0, 0, .35); }
+  50% { box-shadow: 0 0 0 3px var(--marka-parlak), 0 0 0 12px color-mix(in srgb, var(--marka-parlak) 0%, transparent), 0 4px 10px rgba(0, 0, 0, .35); }
+}
+.harita-arac.yakin .ha-yas { color: var(--ink); background: color-mix(in srgb, var(--marka-parlak) 30%, var(--surface)); }
+.kg-acik .harita-daire { pointer-events: none !important; }
+.harita-kap.kg-acik .leaflet-container, .harita-kap.kg-acik .leaflet-grab { cursor: crosshair; }
+.hl-daire { width: 12px; height: 12px; border-radius: 99px; border: 1.5px dashed var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); box-sizing: border-box; flex: none; }
+.hl-daire.yakin { border: 2px solid var(--marka-parlak); background: color-mix(in srgb, var(--marka-parlak) 28%, transparent); }
+.hk-tahmin { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 11.5px; font-weight: 600; color: var(--ink-2); }
+.hk-tahmin > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hk-tahmin b { color: var(--ink); }
+.hk-tahmin-ic { flex: none; width: 11px; height: 11px; border-radius: 99px; border: 1.5px dashed var(--red); background: var(--red-soft); box-sizing: border-box; }
+.hk-tahmin.yakin .hk-tahmin-ic { border: 2px solid var(--marka-parlak); background: color-mix(in srgb, var(--marka-parlak) 28%, transparent); }
+.hd-ana { font-size: 12.5px; font-weight: 700; line-height: 1.4; color: var(--ink); }
+.hd-metin { background: var(--red-soft); font-weight: 600; }
+.hd-yakin { background: color-mix(in srgb, var(--marka-parlak) 16%, var(--surface)); border: 1px solid var(--marka-parlak); }
+
+/* Konum gir paneli (Admin / araç yöneticisi): haritanın sol üstünde, harita dokunulabilir kalır */
+.hkg { position: absolute; top: 12px; left: 12px; z-index: 9; width: 340px; max-width: calc(100% - 24px); box-sizing: border-box; display: flex; flex-direction: column; gap: 9px; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); color: var(--ink); font: 13px/1.4 var(--font); animation: smIn .15s ease-out; }
+.hkg-ust { display: flex; align-items: center; gap: 8px; }
+.hkg-ust b { font-size: 14px; font-weight: 900; white-space: nowrap; }
+.hkg-arac { flex: 1; min-width: 0; height: 30px; padding: 0 6px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink); font: 700 12.5px/1 var(--font); }
+.hkg-ara { display: flex; gap: 6px; margin: 0; }
+.hkg-ara input { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink); font: 500 15px/1 var(--font); outline: none; }
+.hkg-ara input:focus { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-soft); background: var(--surface); }
+.hkg-ara input::placeholder { color: var(--ink-3); font-size: 13px; }
+.hkg-ara button { flex: none; height: 36px; padding: 0 14px; border-radius: 8px; border: 0; background: var(--ink); color: var(--surface); font: 800 13px/1 var(--font); cursor: pointer; }
+.hkg-ara button:disabled { opacity: .5; cursor: progress; }
+.hkg-sonuc { display: flex; flex-direction: column; gap: 4px; max-height: 168px; overflow: auto; overscroll-behavior: contain; }
+.hkg-sonuc:empty { display: none; }
+.hkg-s { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: 600 12.5px/1.3 var(--font); text-align: left; cursor: pointer; }
+.hkg-s:hover { background: var(--hover); border-color: var(--line-2); }
+.hkg-s span { flex: 1; min-width: 0; }
+.hkg-s small, .hkg-dog-b small { font-size: 11px; font-weight: 700; color: var(--ink-3); white-space: nowrap; }
+.hkg-bos { padding: 2px; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.hkg-ipucu { font-size: 12px; font-weight: 600; color: var(--ink-3); text-align: center; }
+.hkg-dog { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.hkg-dog-b { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font: 700 12.5px/1.2 var(--font); cursor: pointer; }
+.hkg-dog-b:hover { background: var(--hover); }
+.hkg-dog-b.on { border: 1.5px solid var(--red); background: var(--red-soft); padding: 5.5px 3.5px; }
+.hkg-dog-b.on small { color: var(--ink-2); }
+.hkg-alt { display: flex; align-items: center; gap: 8px; }
+.hkg-nokta { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hkg-kaydet { flex: none; height: 36px; padding: 0 18px; border-radius: 8px; border: 0; background: var(--red); color: var(--on-red); font: 800 13px/1 var(--font); cursor: pointer; }
+.hkg-kaydet:disabled { opacity: .45; cursor: not-allowed; }
+.hk-a4 > button { white-space: nowrap; }
+
 @media (max-width: 1180px) { .hc-takip em { display: none; } }
 @media (max-width: 900px) {
   .harita-sayfa { grid-template-columns: 300px minmax(0, 1fr); height: calc(100vh - var(--ust-h) - 28px); height: calc(100dvh - var(--ust-h) - 28px); }
@@ -1002,6 +1326,8 @@ a.hp-bag:hover { background: var(--hover); }
   .harita-kap { order: -1; }
   .harita-liste { max-height: 60vh; }
   .harita-lejant { max-width: calc(100% - 24px); }
+  .hkg { top: 8px; left: 8px; right: 8px; width: auto; max-width: none; }
+  .kg-acik .harita-ust-sag { display: none; }
 }`;
   document.head.appendChild(s);
 }

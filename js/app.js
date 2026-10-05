@@ -9,7 +9,7 @@ import { $, el, bas, paletAc, toast, hataGoster, cekmeceKapat, kisiKartiAc } fro
 export const EKRANLAR = {
   masa:      { dosya: './ekranlar/masa.js',      ad: 'Masa',      roller: ['yonetici', 'kurul', 'masa'] },
   kisiler:   { dosya: './ekranlar/kisiler.js',   ad: 'Kişiler',   roller: ['yonetici', 'kurul', 'masa', 'rapor'] },
-  harita:    { dosya: './ekranlar/harita.js',    ad: 'Harita',    roller: ['yonetici', 'kurul', 'masa', 'rapor'] },
+  harita:    { dosya: './ekranlar/harita.js',    ad: 'Harita',    roller: ['yonetici', 'kurul', 'masa', 'rapor', 'arac_yoneticisi'] },
   araclar:   { dosya: './ekranlar/araclar.js',   ad: 'Araçlar',   roller: ['yonetici', 'kurul', 'masa'] },
   dashboard: { dosya: './ekranlar/dashboard.js', ad: 'Dashboard', roller: ['yonetici', 'kurul', 'masa', 'rapor'] },
   yonetim:   { dosya: './ekranlar/yonetim.js',   ad: 'Admin',     roller: ['yonetici'] },
@@ -431,7 +431,10 @@ window.addEventListener('hashchange', git);
 // genişlik 900 px sınırını geçince kabuk (üst menü / ☰) yeniden kurulur
 mqDar.addEventListener?.('change', () => { if (store.ben && aktifYol && !EKRANLAR[aktifYol]?.mobil) git(); });
 (async () => {
-  if (!kurulumBekliyor) {   // 26-27 veritabanı kurulumu sürerken hiçbir yere bağlanılmaz, giriş ekranı uyarı gösterir
+  // ?demo=1 (yalnız 72 dışı seçim, komite.js > DEMO): sahte veriyle açılır, veritabanına hiç bağlanmaz (js/demo.js)
+  if ((await import('./komite.js')).DEMO) {
+    try { (await import('./demo.js')).demoKur(); } catch (e) { console.error('demo kurulamadı', e); }
+  } else if (!kurulumBekliyor) {   // 26-27 veritabanı kurulumu sürerken hiçbir yere bağlanılmaz, giriş ekranı uyarı gösterir
     try { await profilYukle(); } catch (e) { console.warn(e); }
     if (store.ben) await acilis();
   }

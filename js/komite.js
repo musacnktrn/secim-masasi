@@ -72,6 +72,7 @@ export const KOMITELER = {
     simge: '26-27', zilAd: '26-27 Çimento',
     hubAlt: '6 Ekim 2026 · 09:00-17:00 · Fuar İzmir',
     ilzamListesi: false,                    // ilzam listesi yok: rozet gizli, 1-3 hane normal arama
+    konumGir: true,                         // Harita: Admin ve araç yöneticisi şoförün sözlü konumunu girer (arac_konumlari.konum_metni bu projede var)
   },
 };
 export const HUB_SIRA = ['72', '2627'];
@@ -87,6 +88,8 @@ export function aktifKomite(arama = location.search) {
 export const KOMITE_K = aktifKomite();
 // Uygulama modülleri yalnız ?k varken yüklenir (kapi.js); yine de k'siz yüklenirse 1 Ekim'deki gibi 72 davranır.
 export const KOMITE = KOMITELER[KOMITE_K || '72'];
+// ?demo=1: sahte veriyle gösterim (js/demo.js). Yalnız 72 dışındaki seçimde açılır; veritabanına hiç bağlanılmaz, hiçbir şey yazılmaz.
+export const DEMO = !!KOMITE_K && KOMITE_K !== '72' && new URLSearchParams(location.search).get('demo') === '1';
 
 // Tarayıcı depolama anahtarı: 72'de değişmez, 26-27'de 'secim2627' önekli (aynı alan adında iki seçimin oturumu,
 // çevrimdışı işaret sırası ve tercihleri karışmasın). 'secim-tema' -> 'secim2627-tema', 'rapor-sekme' -> 'secim2627-rapor-sekme'.
