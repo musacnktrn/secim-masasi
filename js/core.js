@@ -116,10 +116,11 @@ export function sayac() {
   const oy = hepsi.filter(oyKullandiMi).length;
   return {
     hedef: hedefSayi(), toplam: hepsi.length, bizde: biz.length,
-    oy_kullandi: oy, oy_bizde: biz.filter(oyKullandiMi).length,
+    // 26-27 (KOMITE.tumOySayar): masanın işaretlediği HER oy ana sayaca girer; 72'de yalnız kesin bizde sayılır
+    oy_kullandi: oy, oy_bizde: KOMITE.tumOySayar ? oy : biz.filter(oyKullandiMi).length,
     fuarda: say(hepsi, 'fuarda'), yolda: say(hepsi, 'yolda'), arandi: say(hepsi, 'arandi'), bekliyor: say(hepsi, 'bekliyor'),
     kendi_geldi: hepsi.filter(f => f.kendi_geldi).length,
-    kalan: Math.max(0, hedefSayi() - biz.filter(oyKullandiMi).length),
+    kalan: Math.max(0, hedefSayi() - (KOMITE.tumOySayar ? oy : biz.filter(oyKullandiMi).length)),
     geciken: hepsi.filter(f => gecikme(f) > 0).length,
   };
 }

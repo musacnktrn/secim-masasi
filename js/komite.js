@@ -6,7 +6,7 @@
 // anahtarları (oturumlar korunur) ve Supabase adresi aynı kalır.
 // Bu dosya core.js'i içe AKTARMAZ (giriş merkezi Supabase istemcisi kurulmadan çizilebilsin diye).
 
-export const SURUM = 'v11';            // sw.js CACHE ('secim-v9') ile birlikte artırılır; ekranın köşesinde "v9 · 2627" görünür
+export const SURUM = 'v12';            // sw.js CACHE ('secim-v9') ile birlikte artırılır; ekranın köşesinde "v9 · 2627" görünür
 
 // ---------------------------------------------------------------- 26-27 Supabase projesi
 // Musa projeyi açınca YALNIZ bu iki satır doldurulur (Project Settings > API: Project URL ve anon / publishable anahtar).
@@ -75,6 +75,7 @@ export const KOMITELER = {
     ilzamListesi: true,                     // 2026-10-05 21:2x: SOYİSİM.xls ilzam listesi (85 no) yüklendi; 72 gibi
     dispec: true,                           // araç yöneticisi ekranı (#dispec, rol 'arac_yoneticisi'): görev defteri (gorevler) bu seçimde var
     konumGir: true,                         // Harita: Admin ve araç yöneticisi şoförün sözlü konumunu girer (arac_konumlari.konum_metni bu projede var)
+    tumOySayar: true,                       // Musa 2026-10-05 22:20: karşı/belirsiz yazılan biri de gelip oy kullanırsa ana sayaç artar (hedef 90 aynı kalır)
   },
 };
 export const HUB_SIRA = ['72', '2627'];
