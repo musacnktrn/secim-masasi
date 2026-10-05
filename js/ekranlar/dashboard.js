@@ -4,8 +4,9 @@
 // Her rakam store'dan hesaplanır; canlı olay gelince yalnız değişen bölümün DOM'u yenilenir (kaydırma ve filtre korunur).
 import { store, esc, fmt, trBaslik, simdi, simdiDk, dakika, sayac, gecikme, ulasim, firmaListesi, aracOf, DURUM_AD, referansBenMi, karsiladim, isaretleyebilirMi, yazabilirMi } from '../core.js';
 import { kisiKartiAc, toast, hataGoster, paletAc } from '../ui.js';
+import { anahtar } from '../komite.js';
 
-const TERCIH_ANAHTAR = 'secim-dashboard-tercih';
+const TERCIH_ANAHTAR = anahtar('secim-dashboard-tercih');
 const YOKSAY = new Set(['asistan', 'istek', 'profil', 'baglanti']);
 // gelmedi listesinde sıra: ilerlemiş önce (yolda > arandı > bekliyor); fuarda olanlar zaten içeride, listede yok
 const GUN_SIRA = { bekliyor: 0, arandi: 1, yolda: 2 };
@@ -170,7 +171,7 @@ function stilEkle() {
   const eski = document.querySelector('style[data-ekran="dashboard"]'); if (eski) eski.remove();
   const st = document.createElement('style'); st.dataset.ekran = 'dashboard';
   st.textContent = `
-.db-isaretle { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0 0 12px; padding: 12px 18px; border: 0; border-radius: 14px; background: var(--red); color: #fff; cursor: pointer; font: inherit; text-align: left; box-shadow: 0 6px 18px rgba(200,16,46,.25); flex: none; }
+.db-isaretle { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0 0 12px; padding: 12px 18px; border: 0; border-radius: 14px; background: var(--red); color: #fff; cursor: pointer; font: inherit; text-align: left; box-shadow: 0 6px 18px rgba(var(--marka-golge),.25); flex: none; }
 .db-isaretle:active { transform: scale(.99); }
 .db-isaretle-i { width: 34px; height: 34px; border-radius: 50%; background: rgba(255,255,255,.2); display: grid; place-items: center; font-size: 18px; font-weight: 900; flex: none; }
 .db-isaretle-m { display: flex; flex-direction: column; font-size: 17px; font-weight: 800; line-height: 1.2; }

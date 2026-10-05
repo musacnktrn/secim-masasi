@@ -9,6 +9,7 @@ import {
   isaretleyebilirMi, karsiladim, referansBenMi,
 } from '../core.js';
 import { el, kisiKartiAc, toast } from '../ui.js';
+import { anahtar } from '../komite.js';
 
 // ---------------------------------------------------------------- sabitler
 // ALTLIK: CARTO Positron / dark_all 2026-09-30 itibarıyla anahtar istiyor (her karo "API KEY REQUIRED" görseli). Anahtar gelene kadar
@@ -25,7 +26,7 @@ const FUARA_YAKIN = 0.02;        // derece: Fuar'a bu kadar yakın araç odakta 
 const IZMIR = [38.418, 27.125];
 const BEKLEYEN = ['bekliyor', 'arandi'];
 const BITTI = ['fuarda', 'oy_kullandi'];
-const SEKME_ANAHTAR = 'secim-harita-sekme';
+const SEKME_ANAHTAR = anahtar('secim-harita-sekme');
 const GUNLER = [
   { k: 'bekliyor', ad: 'Bekliyor' }, { k: 'arandi', ad: 'Arandı' }, { k: 'yolda', ad: 'Yolda' },
   { k: 'fuarda', ad: 'Fuarda' }, { k: 'oy_kullandi', ad: 'Oy kullandı' },

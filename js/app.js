@@ -1,7 +1,8 @@
-// 72. Komite · Seçim Masası · UYGULAMA KABUĞU (ATLAS, 2026-09-30)
+// Seçim Masası · UYGULAMA KABUĞU (ATLAS, 2026-09-30 · 2026-10-05 iki seçim: js/komite.js, giriş kapısı js/kapi.js)
 // Açılış, oturum, yönlendirme (#masa, #kisiler …), üst çubuk (SM Ustbar), rol bazlı menü, bildirim paneli (zil),
 // bağlantı göstergesi, ekranların canlı yenilenmesi. Görünüm Claude Design teslimine göre; işlev korunur.
-import { store, bus, sb, esc, trBaslik, fmt, simdi, profilYukle, veriYukle, canliBaglan, cikis, ROL_AD, okunmamisBildirim, cevapsizBildirimler, bildirimCevapla, bildirimGoruldu } from './core.js';
+import { store, bus, sb, esc, trBaslik, fmt, simdi, profilYukle, veriYukle, canliBaglan, cikis, ROL_AD, okunmamisBildirim, cevapsizBildirimler, bildirimCevapla, bildirimGoruldu, kurulumBekliyor } from './core.js';
+import { KOMITE, anahtar, logoHtml, surumMetni } from './komite.js';
 import { $, el, bas, paletAc, toast, hataGoster, cekmeceKapat, kisiKartiAc } from './ui.js';
 
 // Ekranlar: yol -> modül yolu + izinli roller + menü
@@ -52,7 +53,8 @@ const KISAYOL = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgen
 
 // ---------------------------------------------------------------- tema
 // tema: tasarımdaki [data-theme="light"|"dark"]; eski [data-tema] da eşlenir (ekran dosyaları hangisini okursa)
-let tema = 'acik'; try { tema = localStorage.getItem('secim-tema') || 'acik'; } catch {}
+const TEMA_ANAHTAR = anahtar('secim-tema');   // 72: 'secim-tema' (değişmedi) · 26-27: 'secim2627-tema'
+let tema = 'acik'; try { tema = localStorage.getItem(TEMA_ANAHTAR) || 'acik'; } catch {}
 function temaUygula(t) { document.documentElement.dataset.tema = t; document.documentElement.dataset.theme = t === 'koyu' ? 'dark' : 'light'; }
 temaUygula(tema);
 function temaDugmeCiz() {
@@ -63,12 +65,14 @@ function temaDugmeCiz() {
 }
 function temaDegistir() {
   const t = document.documentElement.dataset.tema === 'koyu' ? 'acik' : 'koyu'; temaUygula(t);
-  try { localStorage.setItem('secim-tema', t); } catch {}
+  try { localStorage.setItem(TEMA_ANAHTAR, t); } catch {}
   temaDugmeCiz(); bus.emit('tema', { tema: t });
 }
 
 // ---------------------------------------------------------------- kabuk
 let aktif = null, aktifYol = null, yenileBekliyor = false, asistanModul = null;
+// "KIRMIZI LİSTE" rozeti: seçimde liste adı yoksa (26-27) hiç çizilmez
+const listeRozeti = () => (KOMITE.liste ? `<span class="kirmizi-liste">${esc(KOMITE.liste)}</span>` : '');
 const onaySayisi = () => store.istekler.filter(i => i.durum === 'onay_bekliyor').length;
 const onayRozeti = () => { const n = onaySayisi(); return n ? ` <span class="rozet-sayi">${n}</span>` : ''; };
 const ZIL_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>';
@@ -111,7 +115,7 @@ function mbCekmeceHtml() {
   return `<div class="mb-arka" data-mb-arka></div>
   <nav class="mb-cekmece" role="dialog" aria-modal="true" aria-label="Menü" tabindex="-1">
     <div class="mb-c-ust">
-      <div class="mb-c-marka"><span class="mb-c-logo">72. KOMİTE <span class="logo-cubuk">|</span> GENÇ ENERJİ</span><span class="kirmizi-liste">KIRMIZI LİSTE</span></div>
+      <div class="mb-c-marka"><span class="mb-c-logo">${logoHtml('span', 'logo-cubuk')}</span>${listeRozeti()}</div>
       <button type="button" class="mb-dugme" data-mb-kapat aria-label="Menüyü kapat">✕</button>
     </div>
     <div class="mb-c-kim"><span class="avatar">${esc(bas(store.ben.ad_soyad))}</span><div><div class="mb-c-ad">${esc(store.ben.ad_soyad)}</div><div class="mb-c-rol">${esc(rolAd)}</div></div></div>
@@ -121,7 +125,9 @@ function mbCekmeceHtml() {
     <div class="mb-c-alt">
       <button type="button" class="mb-c-alt-dugme atlas" data-mb-atlas>ATLAS'a yaz</button>
       <button type="button" class="mb-c-alt-dugme" data-mb-tema>${koyu ? '☀ Açık tema' : '☾ Koyu tema'}</button>
+      <a class="mb-c-alt-dugme komite-degistir" href="./" data-komite-degistir>Komite değiştir</a>
       <button type="button" class="mb-c-alt-dugme cikis" data-mb-cikis>Çıkış yap</button>
+      <div class="mb-c-surum">Sürüm ${esc(surumMetni())}</div>
     </div>
   </nav>`;
 }
@@ -165,8 +171,8 @@ function kabukHtml(yol, mobil) {
   <div class="kabuk">
     <header class="ust">
       <a class="logo" href="#${varsayilanYol()}">
-        <span class="logo-satir"><span class="logo-yazi">72. KOMİTE <span class="logo-cubuk">|</span> GENÇ ENERJİ</span><span class="kirmizi-liste">KIRMIZI LİSTE</span></span>
-        <span class="logo-alt">İTO 72. Komite</span>
+        <span class="logo-satir"><span class="logo-yazi">${logoHtml('span', 'logo-cubuk')}</span>${listeRozeti()}</span>
+        <span class="logo-alt">${esc(KOMITE.logoAlt)}</span>
       </a>
       <nav class="nav">${menu}</nav>
       <div class="ust-sag">
@@ -216,9 +222,9 @@ function tarihEtiketi() {
   const s = store.ayarlar?.secim || {};
   const anahtar = `${s.tarih}|${s.yer}`;
   if (anahtar === tarihAnahtar) return tarihMetin;
-  let gun = '1 Ekim Perşembe';
+  let gun = KOMITE.gun;
   try { if (s.tarih) gun = new Date(`${s.tarih}T12:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'long' }); } catch {}
-  const yer = String(s.yer || 'Fuar İzmir, Gaziemir').split(',')[0].trim();
+  const yer = String(s.yer || KOMITE.varsayilanYer).split(',')[0].trim();
   tarihAnahtar = anahtar; tarihMetin = `${gun} · ${yer}`;
   return tarihMetin;
 }
@@ -252,7 +258,7 @@ function bildirimSatiri(b, cevapsiz) {
   const ikinci = b.metin && b.metin !== 'Cevaplamak için dokun' ? `<div class="zil-alt-metin">${esc(b.metin)}</div>` : '';
   const durum = cevaplandi ? 'cevaplandi' : cevapsiz ? 'cevapsiz' : panelOkunmamis.has(b.id) ? 'okunmamis' : '';
   return `<div class="zil-satir ${durum}" data-b="${b.id}">
-    <div class="zil-satir-ust"><div class="zil-marka">72</div><div class="zil-ad">72. Komite</div>${cevapsiz && !cevaplandi ? '<span class="zil-cevapsiz-rozet">CEVAPSIZ</span>' : ''}<div class="zil-zaman">${esc(fmt.saat(b.zaman))} · ${kaynak}</div></div>
+    <div class="zil-satir-ust"><div class="zil-marka">${esc(KOMITE.simge)}</div><div class="zil-ad">${esc(KOMITE.zilAd)}</div>${cevapsiz && !cevaplandi ? '<span class="zil-cevapsiz-rozet">CEVAPSIZ</span>' : ''}<div class="zil-zaman">${esc(fmt.saat(b.zaman))} · ${kaynak}</div></div>
     <button type="button" class="zil-metin" data-ac="${b.id}">${esc(b.baslik || b.metin || 'Bildirim')}</button>${ikinci}
     ${sec.length ? `<div class="zil-cevaplar" style="grid-template-columns:repeat(${Math.min(4, Math.max(2, sec.length))},minmax(0,1fr))">${sec.map(c => `<button type="button" class="${cevapSinifi(c)}" data-cevap="${b.id}" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
     ${karsilayan}
@@ -310,7 +316,7 @@ function menuAc() {
   panelleriKapat();
   const a = $('[data-kullanici]'); if (!a) return;
   const arka = el('<div class="zil-arka" data-menu-arka></div>');
-  const m = el(`<div class="kullanici-menu" role="menu"><div class="km-ust"><div class="km-ad">${esc(store.ben.ad_soyad)}</div><div class="km-rol">${esc(ROL_AD[store.ben.rol] || store.ben.rol)}</div></div><button type="button" data-cikis-yap role="menuitem">Çıkış yap</button></div>`);
+  const m = el(`<div class="kullanici-menu" role="menu"><div class="km-ust"><div class="km-ad">${esc(store.ben.ad_soyad)}</div><div class="km-rol">${esc(ROL_AD[store.ben.rol] || store.ben.rol)}</div></div><a class="km-oge" href="./" data-komite-degistir role="menuitem">Komite değiştir</a><button type="button" data-cikis-yap role="menuitem">Çıkış yap</button><div class="km-surum">Sürüm ${esc(surumMetni())}</div></div>`);
   arka.addEventListener('click', panelleriKapat);
   m.querySelector('[data-cikis-yap]').addEventListener('click', () => { panelleriKapat(); cikis(); });
   $('#katman').append(arka, m);
@@ -425,10 +431,15 @@ window.addEventListener('hashchange', git);
 // genişlik 900 px sınırını geçince kabuk (üst menü / ☰) yeniden kurulur
 mqDar.addEventListener?.('change', () => { if (store.ben && aktifYol && !EKRANLAR[aktifYol]?.mobil) git(); });
 (async () => {
-  try { await profilYukle(); } catch (e) { console.warn(e); }
-  if (store.ben) await acilis();
+  if (!kurulumBekliyor) {   // 26-27 veritabanı kurulumu sürerken hiçbir yere bağlanılmaz, giriş ekranı uyarı gösterir
+    try { await profilYukle(); } catch (e) { console.warn(e); }
+    if (store.ben) await acilis();
+  }
   git();
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.ready.then(r => r.active?.postMessage({ tur: 'komite', k: KOMITE.k })).catch(() => {});
+  }
 })();
 // bildirime dokununca servis çalışanı açık pencereye {tur:'git', url} yollar: ilgili ekrana yönlendir
 if ('serviceWorker' in navigator) {
@@ -437,7 +448,8 @@ if ('serviceWorker' in navigator) {
     try {
       const u = new URL(v.url, location.href);
       if (u.origin !== location.origin) return;
-      if (u.pathname === location.pathname) { if (u.hash) location.hash = u.hash; } else location.href = u.href;
+      const ayniSecim = !u.searchParams.get('k') || u.searchParams.get('k') === new URLSearchParams(location.search).get('k');
+      if (u.pathname === location.pathname && ayniSecim) { if (u.hash) location.hash = u.hash; } else location.href = u.href;
     } catch {}
   });
 }

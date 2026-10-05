@@ -8,6 +8,7 @@ import {
   yoneticiMi, yazabilirMi, benRol, asistanGonder, istekKarar, durumYap, firmaAdi, gecikme,
 } from './core.js';
 import { el, toast, hataGoster, kisiKartiAc, onayla } from './ui.js';
+import { anahtar } from './komite.js';
 
 // ---------------------------------------------------------------- sabitler (tasarımdaki SM.atlas.ROLE_Q / ROLE_LABEL)
 const BEKLEME_MS = 60000;              // bu süre içinde cevap gelmezse "meşgul, mesajın sırada" notu
@@ -85,9 +86,10 @@ function veriOf(m) {
   if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
   return v && typeof v === 'object' ? v : {};
 }
+// anahtarlar seçime göre önekli (72'de değişmez, 26-27'de 'secim2627-atlas-...'; js/komite.js)
 const ls = {
-  al(k, v0) { try { const v = localStorage.getItem(k); return v === null ? v0 : JSON.parse(v); } catch { return v0; } },
-  yaz(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  al(k, v0) { try { const v = localStorage.getItem(anahtar(k)); return v === null ? v0 : JSON.parse(v); } catch { return v0; } },
+  yaz(k, v) { try { localStorage.setItem(anahtar(k), JSON.stringify(v)); } catch {} },
 };
 // Türkçe tamlayan eki (tasarımdaki gen): "Ayşe K.'nın", "Test Masa'nın", "Test Sofor'un"
 const UNLU = 'aıoueiöü';
@@ -796,7 +798,7 @@ function stilEkle() {
 .atlas-dugme:active { transform: scale(.95); }
 .atlas-dugme .asistan-dugme-yazi { pointer-events: none; }
 .atlas-dugme.asistan-nabiz { animation: asistan-nabiz 1.1s ease-out 3; }
-@keyframes asistan-nabiz { 0% { box-shadow: 0 10px 28px rgba(200,16,46,.4), 0 0 0 4px rgba(200,16,46,.12), 0 0 0 0 rgba(200,16,46,.55); } 100% { box-shadow: 0 10px 28px rgba(200,16,46,.4), 0 0 0 4px rgba(200,16,46,.12), 0 0 0 18px rgba(200,16,46,0); } }
+@keyframes asistan-nabiz { 0% { box-shadow: 0 10px 28px rgba(var(--marka-golge),.4), 0 0 0 4px rgba(var(--marka-golge),.12), 0 0 0 0 rgba(var(--marka-golge),.55); } 100% { box-shadow: 0 10px 28px rgba(var(--marka-golge),.4), 0 0 0 4px rgba(var(--marka-golge),.12), 0 0 0 18px rgba(var(--marka-golge),0); } }
 .atlas-dugme.asistan-bekliyor::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--red); border-right-color: var(--red); animation: asistan-don 1s linear infinite; pointer-events: none; }
 @keyframes asistan-don { to { transform: rotate(360deg); } }
 

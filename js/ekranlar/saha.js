@@ -10,6 +10,7 @@ import {
   karsiladim, referansBenMi, isaretleyebilirMi, oyBekliyor, oyOnaylayabilirMi, oyOnayla, oyReddet,
 } from '../core.js';
 import { toast, hataGoster, onayla, isaretle, kisiKartiAc, modal, modalKapat, ilzamRozet } from '../ui.js';
+import { KOMITE, anahtar, logoHtml } from '../komite.js';
 import asistan from '../asistan.js';
 
 // ---------------------------------------------------------------- sabitler
@@ -72,8 +73,8 @@ const konum = { acik: false, izId: null, nabiz: null, son: null, sonGonderim: 0,
 const eta = { id: 0, anahtar: '', dur: null, fuar: null, t: 0, yukleniyor: false };
 
 const soforMu = () => store.ben?.rol === 'sofor';
-const tercihAnahtar = () => `saha-tercih-${store.ben?.id || ''}`;
-const konumAnahtari = () => `saha-konum-acik-${store.ben?.id || ''}`;
+const tercihAnahtar = () => anahtar(`saha-tercih-${store.ben?.id || ''}`);
+const konumAnahtari = () => anahtar(`saha-konum-acik-${store.ben?.id || ''}`);
 function tercihOku() {
   tercih = { mod: null, filtre: [], arac: null };
   try {
@@ -181,8 +182,8 @@ function ustHtml() {
   return `
   <header class="saha-ust">
     <div class="saha-marka">
-      <div class="saha-logo">72. KOMİTE <i>|</i> GENÇ ENERJİ</div>
-      <div class="saha-kirmizi">KIRMIZI LİSTE</div>
+      <div class="saha-logo">${logoHtml('i')}</div>
+      ${KOMITE.liste ? `<div class="saha-kirmizi">${esc(KOMITE.liste)}</div>` : ''}
       <div class="saha-canli ok" data-nokta><i></i><span data-canli-yazi>Canlı</span></div>
     </div>
     <div class="saha-kim">
@@ -684,12 +685,13 @@ function aramaTemizle(odak) {
 // ve her dokunuşta temayı çeviriyor. Tıklama window'a ulaştığında (kabarmanın sonu) istenen temayı geri yükle.
 // Tasarım token'ları [data-theme="light|dark"] ile, eski adlar [data-tema="acik|koyu"] ile çalışır: ikisi birlikte yazılır.
 let temaIstenen = 'acik';
+const TEMA_ANAHTAR = anahtar('secim-tema');   // app.js ile ortak (seçime göre önekli)
 function temaYaz(t) {
   const h = document.documentElement;
   if (h.dataset.tema !== t) h.dataset.tema = t;
   const theme = t === 'koyu' ? 'dark' : 'light';
   if (h.dataset.theme !== theme) h.dataset.theme = theme;
-  try { if (localStorage.getItem('secim-tema') !== t) localStorage.setItem('secim-tema', t); } catch {}
+  try { if (localStorage.getItem(TEMA_ANAHTAR) !== t) localStorage.setItem(TEMA_ANAHTAR, t); } catch {}
 }
 // HATA DÜZELTMESİ (Musa 2026-09-30): eskiden her dokunuşta temaIstenen geri yazılıyordu (window click koruyucusu);
 // tema başka yerden (üst çubuk) değişince boş yere dokunmak temayı çeviriyordu. Koruyucu kaldırıldı, tema her zaman belgeden okunur.
@@ -853,7 +855,7 @@ export default {
     kok.addEventListener('click', tikla);
     kok.addEventListener('input', yazildi);
     kok.addEventListener('keydown', tusBasildi);
-    try { temaIstenen = localStorage.getItem('secim-tema') === 'koyu' ? 'koyu' : 'acik'; } catch { temaIstenen = document.documentElement.dataset.tema === 'koyu' ? 'koyu' : 'acik'; }
+    try { temaIstenen = localStorage.getItem(TEMA_ANAHTAR) === 'koyu' ? 'koyu' : 'acik'; } catch { temaIstenen = document.documentElement.dataset.tema === 'koyu' ? 'koyu' : 'acik'; }
     temaYaz(temaIstenen);
     gorunurlukDinle = gorunurlukDegisti; document.addEventListener('visibilitychange', gorunurlukDinle);
     zamanlayicilar.push(setInterval(konumCiz, 5000));

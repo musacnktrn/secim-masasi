@@ -7,6 +7,7 @@ import {
   SINIF_AD, ROL_AD, gecikme, cikis, okunmamisBildirim,
 } from '../core.js';
 import { bas, rozetDurum, rozetSinif, kisiKartiAc, cekmeceKapat } from '../ui.js';
+import { KOMITE, anahtar, logoHtml } from '../komite.js';
 
 // ---------------------------------------------------------------- sabitler
 const SEKMELER = [
@@ -14,9 +15,9 @@ const SEKMELER = [
   { k: 'gelenler', ad: 'Gelenler', ikon: '≡' },
   { k: 'referanslar', ad: 'Referanslar', ikon: '▤' },
 ];
-const SEKME_ANAHTAR = 'rapor-sekme';
-const SERIT_ANAHTAR = 'rapor-ana-ekran-kapandi';
-const TEMA_ANAHTAR = 'secim-tema';          // app.js ile ortak
+const SEKME_ANAHTAR = anahtar('rapor-sekme');
+const SERIT_ANAHTAR = anahtar('rapor-ana-ekran-kapandi');
+const TEMA_ANAHTAR = anahtar('secim-tema');          // app.js ile ortak (seçime göre önekli, js/komite.js)
 // app.js EKRANLAR tablosunun rol izinleri (menüdeki "diğer ekranlar" için; app.js'i burada içe aktarmıyoruz)
 const DIGER_EKRANLAR = [
   { k: 'masa', ad: 'Masa', roller: ['yonetici', 'kurul', 'masa'] },
@@ -174,7 +175,7 @@ export default {
         <div class="rp-kafa">
           <header class="rp-ust">
             <div class="rp-marka">
-              <div class="rp-logo">72. KOMİTE <span>|</span> GENÇ ENERJİ</div>
+              <div class="rp-logo">${logoHtml('span')}</div>
               <div class="rp-sub">Canlı rapor · salt okunur</div>
             </div>
             <div class="rp-sag">
@@ -278,7 +279,7 @@ function seritCiz() {
     : `<button class="rp-serit-btn" data-rehber>Nasıl?</button>`;
   yazHtml(yer, `
     <div class="rp-serit" role="note">
-      <div class="rp-uyg-ikon">72</div>
+      <div class="rp-uyg-ikon">${esc(KOMITE.simge)}</div>
       <div class="rp-serit-metin"><b>Ana ekrana ekle</b><span>Uygulama gibi tam ekran, tek dokunuşla açılır.</span></div>
       ${dugme}
       <button class="rp-serit-kapat" data-serit-kapat aria-label="Kapat">${IKON.kapat(16)}</button>
@@ -776,7 +777,7 @@ function menuSayfa() {
 // ---------------------------------------------------------------- ANA EKRANA EKLE (SM Rapor üçüncü ekran: 3 adım kartı)
 const PAYLAS_SVG = (w = 26, h = 30, k = 2.2) => `<svg width="${w}" height="${h}" viewBox="0 0 26 30" fill="none" stroke="var(--blue)" stroke-width="${k}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2v17M7 8l6-6 6 6"/><path d="M8 12H4v16h18V12h-4"/></svg>`;
 const adimKart = (n, metin, sag) => `<div class="rp-ak"><div class="rp-ak-no">${n}</div><div class="rp-ak-metin">${metin}</div>${sag}</div>`;
-const uygSimge = `<div class="rp-ak-simge"><div class="rp-ak-simge-kutu"><b>72</b><i>GENÇ ENERJİ</i></div><span>Seçim Masası</span></div>`;
+const uygSimge = `<div class="rp-ak-simge"><div class="rp-ak-simge-kutu"><b>${esc(KOMITE.simge)}</b><i>${esc(KOMITE.marka || 'SEÇİM')}</i></div><span>${esc(KOMITE.uygulamaAdi)}</span></div>`;
 function rehberSayfa() {
   const c = cihaz();
   const p = rehberPlatform || (c.android ? 'android' : 'ios');
@@ -886,7 +887,7 @@ html.rapor-acik .cekmece-govde { padding-bottom: calc(32px + env(safe-area-inset
 
 /* SON DAKİKA şeridi */
 .rp-sondk { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 14px; border: 0; background: var(--red); color: #fff !important; text-align: left; cursor: pointer; overflow: hidden; }
-.rp-sondk-et { flex: none; font-size: 10px; font-weight: 900; letter-spacing: .12em; background: #fff; color: #C8102E; padding: 3px 6px; border-radius: 4px; white-space: nowrap; }
+.rp-sondk-et { flex: none; font-size: 10px; font-weight: 900; letter-spacing: .12em; background: #fff; color: var(--marka); padding: 3px 6px; border-radius: 4px; white-space: nowrap; }
 .rp-sondk-metin { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rp-sondk-ok { flex: none; font-size: 20px; line-height: 1; opacity: .8; }
 .rp-flas { animation: rp-flas 1.2s ease-out; }
@@ -896,7 +897,7 @@ html.rapor-acik .cekmece-govde { padding-bottom: calc(32px + env(safe-area-inset
 .rp-serit-kok:empty { display: none; }
 .rp-serit-kok { padding: 12px 14px 0; }
 .rp-serit { display: flex; align-items: center; gap: 12px; padding: 10px 6px 10px 10px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); animation: smIn .25s ease-out; }
-.rp-uyg-ikon { width: 40px; height: 40px; border-radius: 10px; background: #C8102E; color: #fff; display: grid; place-items: center; font-weight: 900; font-size: 15px; letter-spacing: -.02em; flex: none; }
+.rp-uyg-ikon { width: 40px; height: 40px; border-radius: 10px; background: var(--marka); color: #fff; display: grid; place-items: center; font-weight: 900; font-size: 15px; letter-spacing: -.02em; flex: none; }
 .rp-serit-metin { flex: 1; min-width: 0; line-height: 1.3; }
 .rp-serit-metin b { display: block; font-size: 14px; font-weight: 800; }
 .rp-serit-metin span { display: block; font-size: 12px; color: var(--ink-2); }
@@ -1110,7 +1111,7 @@ html.rapor-acik .cekmece-govde { padding-bottom: calc(32px + env(safe-area-inset
 .rp-ak-liste div { height: 22px; border-radius: 5px; background: var(--surface); border: 1.5px solid var(--blue); display: flex; align-items: center; gap: 5px; padding: 0 6px; font-size: 9.5px; font-weight: 700; white-space: nowrap; overflow: hidden; }
 .rp-ak-kare { flex: none; width: 10px; height: 10px; border: 1.5px solid var(--ink); border-radius: 3px; box-sizing: border-box; }
 .rp-ak-simge { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.rp-ak-simge-kutu { width: 56px; height: 56px; border-radius: 14px; background: #C8102E; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; box-shadow: 0 4px 10px rgba(200,16,46,.3); }
+.rp-ak-simge-kutu { width: 56px; height: 56px; border-radius: 14px; background: var(--marka); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; box-shadow: 0 4px 10px rgba(var(--marka-golge),.3); }
 .rp-ak-simge-kutu b { font-size: 20px; font-weight: 900; }
 .rp-ak-simge-kutu i { font-style: normal; font-size: 6.5px; font-weight: 800; letter-spacing: .1em; margin-top: 2px; white-space: nowrap; }
 .rp-ak-simge span { font-size: 10px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }

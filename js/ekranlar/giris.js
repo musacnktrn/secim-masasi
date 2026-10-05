@@ -1,7 +1,8 @@
 // Giriş (SM Giris): sol 640 px kırmızı panel, sağda ad soyad + 4 kutulu PIN + 68 px tuş takımı.
 // Telefonda tek sütun (kırmızı üst blok). Hatalı PIN: amber kutular + sallanma + "PIN hatalı" metni. Son yazılan ad hatırlanır.
 // 2026-10-01: ad yazılmadıysa 4 hane girilince PIN'in sahibi bulunur, "Ad Soyad · Rol, bu sen misin?" kartı çıkar; [Evet, gir] ile girilir.
-import { girisYap, pinSahibi, pinleGir, ROL_AD, esc, trBaslik } from '../core.js';
+import { girisYap, pinSahibi, pinleGir, ROL_AD, esc, trBaslik, kurulumBekliyor } from '../core.js';
+import { KOMITE, KOMITE_SORUN, SORUN_METNI, anahtar, logoHtml } from '../komite.js';
 
 const YON = { yonetici: 'masaya', kurul: 'masaya', masa: 'masaya', sofor: 'sahaya', sorumlu: 'araç listene', rapor: 'rapora' };
 
@@ -13,26 +14,29 @@ export default {
     let mesaj = '';
     let pinHatasi = false;    // yalnız PIN yanlışsa kutular amber olur (ad bulunamadı gibi hatalarda olmaz)
     let zamanlayici = 0;
-    let sonAd = ''; try { sonAd = localStorage.getItem('secim-son-ad') || ''; } catch {}
+    const SON_AD = anahtar('secim-son-ad');
+    let sonAd = ''; try { sonAd = localStorage.getItem(SON_AD) || ''; } catch {}
+    const K = KOMITE, kapali = kurulumBekliyor;   // 26-27 veritabanı kurulumu sürerken giriş kapalı
 
     kok.innerHTML = `
     <div class="giris-sayfa">
       <section class="giris-sol">
         <div class="giris-ust">
-          <div class="giris-baslik">72. KOMİTE <span>|</span> GENÇ ENERJİ</div>
-          <div class="giris-aciklama">İzmir Ticaret Odası 72. Komite · İklimlendirme, Mekanik ve Doğalgaz Grubu</div>
-          <div class="giris-rozet-satir"><div class="giris-rozet">KIRMIZI LİSTE</div><div class="giris-tel-tarih">1 Ekim · Fuar İzmir</div></div>
+          <div class="giris-baslik">${logoHtml('span')}</div>
+          <div class="giris-aciklama">${esc(K.aciklama)}</div>
+          <div class="giris-rozet-satir">${K.liste ? `<div class="giris-rozet">${esc(K.liste)}</div>` : ''}<div class="giris-tel-tarih">${esc(K.kisaTarih)}</div></div>
         </div>
         <div class="giris-alt">
           <div class="giris-masa">SEÇİM MASASI</div>
-          <div class="giris-tarih">1 Ekim 2026 Perşembe<br>Fuar İzmir (Gaziemir)</div>
-          <div class="giris-cizgi"></div>
-          <div class="giris-slogan">Enerjimiz sektörden, gücümüz gençlikten</div>
+          <div class="giris-tarih">${esc(K.uzunTarih)}<br>${esc(K.uzunYer)}${K.uzunSaat ? `<br>${esc(K.uzunSaat)}` : ''}</div>
+          ${K.slogan ? `<div class="giris-cizgi"></div>
+          <div class="giris-slogan">${esc(K.slogan)}</div>` : ''}
         </div>
       </section>
       <section class="giris-sag">
         <form class="giris-kutu" autocomplete="off" novalidate>
           <div class="giris-baslik-blok"><h2>Giriş</h2><div class="giris-not">Sana verilen 4 haneli PIN'i gir. Adını yazmak zorunlu değil.</div></div>
+          ${kapali ? `<div class="giris-kurulum" role="status"><b>${KOMITE_SORUN === 'bekliyor' ? 'Veritabanı kurulumu sürüyor' : 'Giriş geçici olarak kapalı'}</b><span>${esc(SORUN_METNI[KOMITE_SORUN] || '')}</span></div>` : ''}
           <div class="giris-alan">
             <label class="giris-etiket" for="giris-ad">AD SOYAD (isteğe bağlı)</label>
             <input class="giris-ad" id="giris-ad" name="ad" value="" placeholder="Ad soyad" autocapitalize="words" autocomplete="off" spellcheck="false" enterkeyhint="next" aria-label="Ad soyad">
@@ -45,7 +49,7 @@ export default {
           <div class="giris-onay" data-onay hidden></div>
           <div class="tus-takimi">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button type="button" class="tus" data-t="${n}">${n}</button>`).join('')}<button type="button" class="tus sil" data-t="sil" aria-label="Sil">⌫</button><button type="button" class="tus" data-t="0">0</button><button type="submit" class="tus gir">Giriş</button></div>
           <div class="giris-dipnot">PIN'ini unuttuysan yöneticiye yaz.</div>
-          <div class="giris-slogan-tel">Enerjimiz sektörden, gücümüz gençlikten</div>
+          ${K.slogan ? `<div class="giris-slogan-tel">${esc(K.slogan)}</div>` : ''}
         </form>
       </section>
     </div>`;
@@ -54,16 +58,17 @@ export default {
     const mesajKutu = kok.querySelector('[data-mesaj]'), tuslar = [...kok.querySelectorAll('.tus')];
     const onayKutu = kok.querySelector('[data-onay]'), takim = kok.querySelector('.tus-takimi');
     form.ad.value = sonAd;
+    if (kapali) form.ad.disabled = true;
     stilEkle();
 
     const ciz = () => {
       kutular.forEach((k, i) => {
         k.textContent = pin[i] ? '●' : '';
-        k.className = 'pin-kutu' + (durum === 'hata' && pinHatasi ? ' hata' : durum === 'tamam' ? ' tamam' : durum === 'bos' && i === pin.length ? ' sira' : '');
+        k.className = 'pin-kutu' + (durum === 'hata' && pinHatasi ? ' hata' : durum === 'tamam' ? ' tamam' : durum === 'bos' && !kapali && i === pin.length ? ' sira' : '');
       });
       mesajKutu.className = 'giris-mesaj' + (durum === 'tamam' ? ' tamam' : durum === 'kontrol' ? ' notr' : '');
       mesajKutu.textContent = durum === 'hata' ? `▲ ${mesaj}` : durum === 'tamam' ? `✓ ${mesaj}` : durum === 'kontrol' ? 'Giriş yapılıyor…' : '';
-      const kilit = durum === 'kontrol' || durum === 'tamam';
+      const kilit = kapali || durum === 'kontrol' || durum === 'tamam';
       tuslar.forEach(t => { t.disabled = kilit; });
       // onay kartı: tuş takımının yerine çıkar (başparmağın altında iki büyük düğme)
       const onayda = durum === 'onay' && kisi;
@@ -95,12 +100,13 @@ export default {
       hataYaz(pinMi ? (form.ad.value.trim() ? 'PIN hatalı · tekrar dene' : 'PIN hatalı · tekrar dene ya da adını da yaz') : e.message, { pin: pinMi, ad: /Adını da yaz/i.test(e.message) });
     };
     const girildi = async (ben, ad) => {
-      try { localStorage.setItem('secim-son-ad', ad); } catch {}
+      try { localStorage.setItem(SON_AD, ad); } catch {}
       durum = 'tamam'; mesaj = `Hoş geldin, ${YON[ben?.rol] ? YON[ben.rol] + ' ' : ''}yönlendiriliyorsun…`; ciz();
       await girisSonrasi();
     };
     const gonder = async () => {
       clearTimeout(zamanlayici);
+      if (kapali) return;
       if (durum === 'kontrol' || durum === 'tamam') return;
       if (durum === 'onay') return onayla();
       const ad = form.ad.value.trim();
@@ -123,7 +129,7 @@ export default {
       kisi = null; pin = ''; temizleHata(); ciz();
     }
     const tus = k => {
-      if (durum === 'kontrol' || durum === 'tamam') return;
+      if (kapali || durum === 'kontrol' || durum === 'tamam') return;
       if (document.activeElement === form.ad) form.ad.blur();   // telefonda klavye tuş takımını kapatmasın
       if (durum === 'onay') return;
       if (k === 'sil') { if (durum === 'hata') temizleHata(); pin = pin.slice(0, -1); return ciz(); }
@@ -170,6 +176,8 @@ function stilEkle() {
 .giris-onay-dugmeler { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .giris-onay-dugmeler .tus { font-size: 18px; font-weight: 800; }
 .giris-onay-dugmeler .giris-onay-hayir { font-size: 16px; color: var(--ink-2); }
-@media (max-width: 900px) { .giris-onay-dugmeler .tus { height: 58px; } }`;
+.giris-kurulum { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 12px; background: var(--amber-soft); border: 1.5px solid var(--amber); color: var(--amber-ink); font-size: 14px; font-weight: 600; line-height: 1.4; }
+.giris-kurulum b { font-size: 16px; font-weight: 900; color: var(--ink); }
+@media (max-width: 900px) { .giris-onay-dugmeler .tus { height: 58px; } .giris-kurulum { margin-bottom: 4px; } }`;
   document.head.appendChild(s);
 }

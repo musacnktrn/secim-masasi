@@ -7,11 +7,12 @@ import {
   ROL_AD, referansBenMi, karsiladim, isaretleyebilirMi,
 } from '../core.js';
 import { $, bas, isaretle, kisiKartiAc, toast, hataGoster, ilzamRozet } from '../ui.js';
+import { anahtar } from '../komite.js';
 
 // ---------------------------------------------------------------- sabitler
 const SAYFA = 200;                       // ilk açılışta ve her "daha fazla"da eklenen satır
 const YOK = '__yok';                     // "referansı yok" / "ilçesi yok" / "sorumlusu yok" seçeneği
-const DEPO = 'secim-kisiler-gorunum';    // sekme içinde filtre hafızası (sessionStorage)
+const DEPO = anahtar('secim-kisiler-gorunum');    // sekme içinde filtre hafızası (sessionStorage; seçime göre önekli)
 const kol = new Intl.Collator('tr', { sensitivity: 'base', numeric: true });
 const SINIF_I = Object.fromEntries(SINIFLAR.map((s, i) => [s.k, i]));
 const DURUM_I = Object.fromEntries(DURUMLAR.map((x, i) => [x.k, i]));

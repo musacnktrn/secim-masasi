@@ -9,12 +9,13 @@ import {
   karsiladim, referansBenMi,
 } from '../core.js';
 import { el, bas, rozetDurum, isaretle, kisiKartiAc, paletAc, paletKapat, modal, modalKapat, toast, hataGoster } from '../ui.js';
+import { anahtar } from '../komite.js';
 
 // ---------------------------------------------------------------- sabitler
 const SOL = 176;             // çizelge satır başlığı genişliği (px)
 const CHIP_G = 88, CHIP_Y = 34, CHIP_ARA = 4;   // çip ölçüsü (tasarım: 88x34)
 const SATIR_MIN = 44;        // tek şeritli satır yüksekliği
-const TERCIH = 'secim-masa-tercih-v2';
+const TERCIH = anahtar('secim-masa-tercih-v2');
 const GUN = {
   bekliyor: { ad: 'Bekliyor', renk: 'var(--ink-3)', fiil: 'bekliyor' },
   arandi: { ad: 'Arandı', renk: 'var(--blue)', fiil: 'arandı' },
@@ -870,7 +871,7 @@ function stilEkle() {
 .masa-iz.havuz .masa-past { display: none; }
 .masa-iz.over { background-color: var(--red-soft); outline: 1.5px dashed var(--red); outline-offset: -2px; }
 .masa-past { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: var(--past); pointer-events: none; }
-.masa-simdi { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--red); z-index: 5; pointer-events: none; box-shadow: 0 0 0 3px rgba(200, 16, 46, .12); transition: left .6s linear; }
+.masa-simdi { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--red); z-index: 5; pointer-events: none; box-shadow: 0 0 0 3px rgba(var(--marka-golge), .12); transition: left .6s linear; }
 .masa-bos { padding: 40px 16px; text-align: center; color: var(--ink-3); font-size: 13px; }
 
 /* çizelge çipi 88x34 */

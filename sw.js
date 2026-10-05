@@ -1,12 +1,13 @@
-// 72. Komite · Seçim Masası · SERVİS ÇALIŞANI (ATLAS, 2026-09-30)
+// Seçim Masası · SERVİS ÇALIŞANI (ATLAS, 2026-09-30 · 2026-10-05 iki seçim: 72 ve 26-27 aynı kabuğu paylaşır)
 // Görevi: uygulama kabuğunu (sayfa, stil, JS modülleri, ikonlar) telefonda saklamak ki ana ekrandan
 // açılan uygulama zayıf ağda da hızlı gelsin. Strateji AĞ ÖNCE: internet varsa her zaman en güncel dosya
 // gelir (gün içinde yapılan düzeltmeler anında yansır), ağ yoksa ya da çok yavaşsa saklanan kopya verilir.
 // Yalnız bu sitenin kendi dosyalarına dokunur. Supabase (veri + canlı bağlantı), jsDelivr / unpkg (kütüphaneler),
 // Google Fonts ve harita karoları başka kökendendir; bu çalışan onları hiç görmez, tarayıcı normal yoluyla gider.
 
-const CACHE = 'secim-v8';          // kabuk listesi değişince sürümü artır: eski önbellek kendiliğinden silinir
+const CACHE = 'secim-v9';          // kabuk listesi değişince sürümü artır: eski önbellek kendiliğinden silinir (js/komite.js SURUM ile aynı)
 const ONEK = 'secim-';             // yalnız bu uygulamanın önbelleklerini temizle
+const KOMITE_DEPO = 'secim-son-komite';   // son açılan seçim (bildirime dokununca doğru seçime dönmek için); sürümle silinmez
 const ZAMAN_ASIMI = 3500;          // saklı kopya varken ağı en çok bu kadar bekle (ms)
 const ZAYIF_SURE = 30000;          // ağ bir kez yavaş/kopuk bulununca bu süre boyunca saklı kopya beklemeden verilir
 const SAGLAM_SURE = 1500;          // ağ bu sürede cevap verirse sağlıklı sayılır, zayıf ağ kipi kapanır
@@ -21,7 +22,10 @@ const KABUK = [
   './',
   'index.html',
   'manifest.webmanifest',
+  'manifest-2627.webmanifest',
   'css/app.css',
+  'js/kapi.js',
+  'js/komite.js',
   'js/app.js',
   'js/core.js',
   'js/ui.js',
@@ -40,6 +44,9 @@ const KABUK = [
   'img/ikon-180.png',
   'img/ikon-192.png',
   'img/ikon-512.png',
+  'img/ikon-2627-180.png',
+  'img/ikon-2627-192.png',
+  'img/ikon-2627-512.png',
 ];
 
 const KOK = new URL('./', self.location.href);   // uygulamanın kök adresi (kapsam)
@@ -67,7 +74,7 @@ self.addEventListener('activate', olay => {
   olay.waitUntil((async () => {
     try {
       const adlar = await caches.keys();
-      await Promise.all(adlar.filter(ad => ad.startsWith(ONEK) && ad !== CACHE).map(ad => caches.delete(ad)));
+      await Promise.all(adlar.filter(ad => ad.startsWith(ONEK) && ad !== CACHE && ad !== KOMITE_DEPO).map(ad => caches.delete(ad)));
     } catch (e) { /* yok say */ }
     await self.clients.claim();
   })());
@@ -98,7 +105,7 @@ async function gezinme(olay, url) {
     return await agOnce(olay, istek, anahtar);
   } catch (e) {
     const sakli = await eslesen(anahtar) || (kok ? null : await eslesen(url.href));
-    return sakli || cevrimdisiSayfa();
+    return sakli || cevrimdisiSayfa(seciminK(url));
   }
 }
 
@@ -145,22 +152,28 @@ function saklanirMi(cevap) {
   return !!cevap && cevap.status === 200 && cevap.type === 'basic';
 }
 
-function cevrimdisiSayfa() {
+// ?k=72 / ?k=2627 (ya da 26-27) -> '72' | '2627' | null
+function seciminK(url) { const k = String(url.searchParams.get('k') || '').replace(/\D/g, ''); return k === '72' || k === '2627' ? k : null; }
+// Çevrimdışı sayfası: 72'de 1 Ekim'deki gibi kırmızı "72"; 26-27'de turkuaz "26-27"; giriş merkezinde turkuaz "SEÇİM".
+function cevrimdisiSayfa(k = '72') {
+  const renk = k === '72' ? '#C8102E' : '#087F8C';
+  const simge = k === '72' ? '72' : k === '2627' ? '26-27' : 'SEÇİM';
+  const boy = k === '72' ? '88px' : '64px';
   const html = `<!doctype html>
 <html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#C8102E">
+<meta name="theme-color" content="${renk}">
 <title>Seçim Masası · Bağlantı yok</title>
 <style>
-  html,body{margin:0;height:100%;background:#C8102E;color:#fff;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+  html,body{margin:0;height:100%;background:${renk};color:#fff;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
   main{min-height:100%;display:grid;place-content:center;gap:14px;text-align:center;padding:24px calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left))}
-  .sayi{font-weight:900;font-size:88px;letter-spacing:-.05em;line-height:.9}
+  .sayi{font-weight:900;font-size:${boy};letter-spacing:-.05em;line-height:.9}
   h1{margin:6px 0 0;font-size:22px;font-weight:800}
   p{margin:0;opacity:.88;font-weight:500;max-width:320px;line-height:1.45}
-  button{margin-top:10px;height:48px;padding:0 22px;border-radius:12px;border:0;background:#fff;color:#C8102E;font:inherit;font-weight:800;font-size:15px;cursor:pointer}
+  button{margin-top:10px;height:48px;padding:0 22px;border-radius:12px;border:0;background:#fff;color:${renk};font:inherit;font-weight:800;font-size:15px;cursor:pointer}
 </style></head>
 <body><main>
-  <div class="sayi">72</div>
+  <div class="sayi">${simge}</div>
   <h1>İnternet bağlantısı yok</h1>
   <p>Bağlantı gelince sayfa kendiliğinden açılacak. Beklemek istemezsen aşağıdan tekrar dene.</p>
   <div><button onclick="location.reload()">Tekrar dene</button></div>
@@ -178,24 +191,47 @@ function cevrimdisiSayfa() {
 
 // ---------------------------------------------------------------- telefon bildirimi (web push)
 // Sunucu (push edge function) {baslik, metin, id, firma_id, tur, url} gönderir. iPhone'da yalnız Ana Ekrana Eklenmiş uygulamada çalışır.
+// İki seçim aynı servis çalışanını paylaşır: uygulama açılışta hangi seçimde olduğunu bildirir ({tur:'komite', k});
+// bildirime dokununca adres bu seçimle (?k=...) açılır, giriş merkezine düşmez.
+const SECIM_ADI = { '72': '72. Komite', '2627': '26-27 Çimento, Kireç, Beton' };
+async function sonKomiteYaz(k) { try { const c = await caches.open(KOMITE_DEPO); await c.put(new URL('son-komite', KOK).href, new Response(k)); } catch (e) { /* yok say */ } }
+async function sonKomiteOku() { try { const c = await caches.open(KOMITE_DEPO); const r = await c.match(new URL('son-komite', KOK).href); const k = r ? await r.text() : ''; return SECIM_ADI[k] ? k : null; } catch (e) { return null; } }
+self.addEventListener('message', olay => {
+  const v = olay.data; if (!v || v.tur !== 'komite' || !SECIM_ADI[v.k]) return;
+  olay.waitUntil(sonKomiteYaz(v.k));
+});
 self.addEventListener('push', olay => {
-  let v = {};
-  try { v = olay.data ? olay.data.json() : {}; } catch { v = { baslik: '72. Komite', metin: olay.data ? olay.data.text() : '' }; }
-  olay.waitUntil(self.registration.showNotification(v.baslik || '72. Komite · Seçim Masası', {
-    body: v.metin || '',
-    icon: 'img/ikon-192.png',
-    badge: 'img/ikon-192.png',
-    tag: v.id ? `b-${v.id}` : undefined,
-    renotify: true,
-    data: { url: v.url || './#bildirimler', id: v.id, firma_id: v.firma_id },
-  }));
+  olay.waitUntil((async () => {
+    const k = await sonKomiteOku();
+    const ad = SECIM_ADI[k || '72'];
+    const ikon = k === '2627' ? 'img/ikon-2627-192.png' : 'img/ikon-192.png';
+    let v = {};
+    try { v = olay.data ? olay.data.json() : {}; } catch { v = { baslik: ad, metin: olay.data ? olay.data.text() : '' }; }
+    await self.registration.showNotification(v.baslik || `${ad} · Seçim Masası`, {
+      body: v.metin || '',
+      icon: ikon,
+      badge: ikon,
+      tag: v.id ? `b-${v.id}` : undefined,
+      renotify: true,
+      data: { url: v.url || './#bildirimler', id: v.id, firma_id: v.firma_id, k },
+    });
+  })());
 });
 self.addEventListener('notificationclick', olay => {
   olay.notification.close();
-  const hedef = new URL(olay.notification.data?.url || './#bildirimler', KOK).href;
   olay.waitUntil((async () => {
+    const veri = olay.notification.data || {};
+    const u = new URL(veri.url || './#bildirimler', KOK);
     const pencereler = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const p of pencereler) { if (p.url.startsWith(KOK_URL)) { await p.focus(); try { await p.navigate(hedef); } catch { p.postMessage({ tur: 'git', url: hedef }); } return; } }
+    const bizim = pencereler.filter(p => p.url.startsWith(KOK_URL));
+    // seçim: bildirimin kendi adresinde yoksa, bildirim geldiğinde açık olan seçim; o da yoksa açık pencerenin seçimi
+    if (!u.searchParams.get('k')) {
+      const k = veri.k || await sonKomiteOku() || bizim.map(p => seciminK(new URL(p.url))).find(Boolean);
+      if (k) u.searchParams.set('k', k);
+    }
+    const hedef = u.href;
+    const ayni = bizim.find(p => seciminK(new URL(p.url)) === seciminK(u)) || bizim[0];
+    if (ayni) { await ayni.focus(); try { await ayni.navigate(hedef); } catch { ayni.postMessage({ tur: 'git', url: hedef }); } return; }
     await self.clients.openWindow(hedef);
   })());
 });

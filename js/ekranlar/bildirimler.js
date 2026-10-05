@@ -8,6 +8,7 @@ import {
   pushDestekli, pushIzni, pushAc, pushTest,
 } from '../core.js';
 import { toast, hataGoster, kisiKartiAc } from '../ui.js';
+import { KOMITE } from '../komite.js';
 
 // ---------------------------------------------------------------- ikonlar
 const svg = (d, k = 1.9) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${k}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -198,7 +199,7 @@ function izinHtml() {
       <button type="button" class="bl-buyuk-btn hayalet" data-test${izinDurumu.mesgul ? ' disabled' : ''}>${izinDurumu.mesgul ? 'Gönderiliyor…' : izinDurumu.test ? '✓ Test bildirimi gönderildi' : 'Test bildirimi gönder'}</button>`;
   } else if (kurulmamis) {
     alt = `<button type="button" class="bl-buyuk-btn" disabled>Önce Ana Ekrana Ekle</button>
-      <div class="bl-kucuk-not">Ana ekrandaki 72 simgesinden aç, sonra bu ekrana dön.</div>`;
+      <div class="bl-kucuk-not">Ana ekrandaki ${esc(KOMITE.simge)} simgesinden aç, sonra bu ekrana dön.</div>`;
   } else if (reddedildi) {
     alt = `<div class="bl-uyari"><span>▲</span><div><b>Bildirim izni kapalı.</b> Telefonun Ayarlar bölümünde Bildirimler altından Seçim Masası için izni aç, sonra bu ekrana dön.</div></div>`;
   } else if (desteklenmiyor) {
@@ -220,7 +221,7 @@ function izinHtml() {
         <div class="bl-adimlar">
           ${adimKart(1, 'Alttaki <b>Paylaş</b> düğmesine dokun.', `<div class="bl-ak-kutu">${PAYLAS_SVG}</div>`)}
           ${adimKart(2, 'Listeyi aşağı kaydır, <b>Ana Ekrana Ekle</b>\'yi seç.')}
-          ${adimKart(3, 'Sağ üstte <b>Ekle</b>\'ye dokun. Ana ekrandaki <b>72</b> simgesinden aç.')}
+          ${adimKart(3, 'Sağ üstte <b>Ekle</b>\'ye dokun. Ana ekrandaki <b>${esc(KOMITE.simge)}</b> simgesinden aç.')}
         </div>` : ''}
       ${izinDurumu.hata ? `<div class="bl-uyari hata"><span>▲</span><div>${esc(izinDurumu.hata)}</div></div>` : ''}
       <div class="bl-izin-alt">${alt}</div>
@@ -291,7 +292,7 @@ html.bl-acik .atlas-dugme { display: none !important; }
 /* bildirimleri aç kartı */
 .bl-izin-kart { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 12px 12px 14px; border-radius: 14px; border: 1.5px solid var(--red); background: var(--red-soft); text-align: left; cursor: pointer; }
 .bl-izin-kart.tamam { border: 1.5px solid var(--green); background: var(--green-soft); }
-.bl-izin-ikon { flex: none; width: 40px; height: 40px; border-radius: 12px; background: #C8102E; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 900; }
+.bl-izin-ikon { flex: none; width: 40px; height: 40px; border-radius: 12px; background: var(--marka); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 900; }
 .bl-izin-ikon svg { width: 22px; height: 22px; }
 .bl-izin-kart.tamam .bl-izin-ikon { background: var(--green); }
 .bl-izin-metin { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -346,7 +347,7 @@ html.bl-acik .atlas-dugme { display: none !important; }
 .bl-izin-ic { min-height: 100%; box-sizing: border-box; max-width: 520px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 24px) 24px calc(28px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 18px; }
 .bl-geri { align-self: flex-start; height: 36px; padding: 0 12px 0 8px; border: 0; border-radius: 10px; background: transparent; font-size: 15px; font-weight: 700; color: var(--ink-2) !important; cursor: pointer; }
 .bl-geri:active { background: var(--surface-3); }
-.bl-zil-kutu { align-self: center; width: 96px; height: 96px; border-radius: 28px; background: #C8102E; display: flex; align-items: center; justify-content: center; box-shadow: 0 12px 30px rgba(200,16,46,.3); }
+.bl-zil-kutu { align-self: center; width: 96px; height: 96px; border-radius: 28px; background: var(--marka); display: flex; align-items: center; justify-content: center; box-shadow: 0 12px 30px rgba(var(--marka-golge),.3); }
 .bl-zil-kutu.yesil { background: var(--green); }
 .bl-zil-kutu span { font-size: 40px; color: #fff; font-weight: 900; }
 .bl-izin-yazi { display: flex; flex-direction: column; gap: 8px; text-align: center; }
@@ -363,7 +364,7 @@ html.bl-acik .atlas-dugme { display: none !important; }
 .bl-ak-kutu { flex: none; width: 52px; height: 52px; border-radius: 12px; background: var(--surface-3); display: flex; align-items: center; justify-content: center; }
 .bl-izin-alt { margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding-top: 6px; }
 .bl-buyuk-btn { height: 58px; border-radius: 14px; border: 0; background: var(--surface-3); color: var(--ink) !important; font-size: 17px; font-weight: 800; cursor: pointer; }
-.bl-buyuk-btn.ana { background: #C8102E; color: #fff !important; }
+.bl-buyuk-btn.ana { background: var(--marka); color: #fff !important; }
 .bl-buyuk-btn.hayalet { height: 54px; background: var(--surface); border: 1.5px solid var(--line-2); font-size: 16px; }
 .bl-buyuk-btn:disabled { opacity: .55; cursor: default; }
 .bl-kucuk-not { text-align: center; font-size: 13px; color: var(--ink-3); }

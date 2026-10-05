@@ -17,17 +17,29 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <link rel="stylesheet" href="css/app.css">
+<script>
+  // İlk boyamadan önce seçimi ve temayı işaretle: 26-27 açılırken bir an kırmızı görünmesin (ayrıntı: js/komite.js)
+  (function () { try {
+    var h = document.documentElement, k = new URLSearchParams(location.search).get('k');
+    k = k ? String(k).replace(/\D/g, '') : ''; k = (k === '72' || k === '2627') ? k : 'hub'; h.setAttribute('data-komite', k);
+    if (k !== '72') document.querySelector('meta[name="theme-color"]').setAttribute('content', '#087F8C');
+    var t = localStorage.getItem(k === '2627' ? 'secim2627-tema' : 'secim-tema');
+    if (t === 'koyu' || t === 'acik') { h.setAttribute('data-tema', t); h.setAttribute('data-theme', t === 'koyu' ? 'dark' : 'light'); }
+  } catch (e) {} })();
+</script>
 </head>
 <body>
 <div id="uygulama">
   <div class="acilis">
-    <div class="acilis-logo">72. KOMİTE <span>|</span> GENÇ ENERJİ</div>
+    <div class="acilis-logo acilis-72">72. KOMİTE <span>|</span> GENÇ ENERJİ</div>
+    <div class="acilis-logo acilis-2627">26-27 ÇİMENTO, KİREÇ, BETON</div>
+    <div class="acilis-logo acilis-hub">SEÇİM MASASI</div>
     <div class="acilis-alt">Seçim Masası yükleniyor…</div>
   </div>
 </div>
 <div id="toastlar" aria-live="polite"></div>
 <div id="katman"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-<script type="module" src="js/app.js"></script>
+<script type="module" src="js/kapi.js"></script>
 </body>
 </html>

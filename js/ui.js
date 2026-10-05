@@ -7,6 +7,7 @@ import {
   durumYap, sinifYap, notEkle, aracAta, sorumluAta, yazabilirMi, isaretleyebilirMi, aramaEslesir, firmaListesi, firmaAdi,
   karsiladim, referansBenMi, ROL_AD, oyOnaylayabilirMi, oyBekliyor, oyOnayla, oyReddet,
 } from './core.js';
+import { KOMITE } from './komite.js';
 
 // ---------------------------------------------------------------- küçük yardımcılar
 export const $ = (s, k = document) => k.querySelector(s);
@@ -176,7 +177,7 @@ button.kk-kutu-orta { cursor:pointer; }
 .kk-cip.reminder { background:var(--blue-soft); color:var(--blue); }
 .kk-cip.missed { background:var(--amber); color:#1a1200; border:1.5px solid var(--amber); animation:smPulse 1.6s ease-in-out infinite; }
 .kk-atlas { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.kk-atlas .rozet { flex:none; width:24px; height:24px; border-radius:99px; background:#C8102E; color:#fff; display:flex; align-items:center; justify-content:center; font-size:6.5px; font-weight:900; letter-spacing:.04em; }
+.kk-atlas .rozet { flex:none; width:24px; height:24px; border-radius:99px; background:var(--marka); color:#fff; display:flex; align-items:center; justify-content:center; font-size:6.5px; font-weight:900; letter-spacing:.04em; }
 .kk-atlas .et { font-size:12px; font-weight:800; letter-spacing:.06em; white-space:nowrap; }
 .kk-atlas button { height:30px; padding:0 11px; border-radius:99px; border:1px solid var(--line-2); background:var(--surface); color:var(--ink); font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
 .kk-atlas button:hover { background:var(--hover); }
@@ -316,7 +317,7 @@ export function kaynakCip(o) {
 }
 
 // ---------------------------------------------------------------- toast (siyah, alt orta, 5 sn geri al çubuğu)
-const NOKTA = { oy: 'var(--green)', oy_kullandi: 'var(--green)', undo: '#8b8b94', vote: '#E3213F', online: '#34C46A', bekliyor: 'var(--ink-3)', arandi: 'var(--blue)', yolda: 'var(--amber)', fuarda: 'var(--violet)' };
+const NOKTA = { oy: 'var(--green)', oy_kullandi: 'var(--green)', undo: '#8b8b94', vote: 'var(--marka-parlak)', online: '#34C46A', bekliyor: 'var(--ink-3)', arandi: 'var(--blue)', yolda: 'var(--amber)', fuarda: 'var(--violet)' };
 export function toast(metin, { tur = '', geriAl = null, sure = 5000, nokta = null, geriAlMetin = 'Geri alındı' } = {}) {
   const renk = NOKTA[nokta] || nokta || (tur === 'hata' ? 'var(--amber)' : tur === 'basari' ? '#34C46A' : '#8b8b94');
   const t = el(`<div class="toast ${esc(tur)}"><i class="t-nokta" style="background:${renk}"></i><span class="t-metin">${esc(metin)}</span>${geriAl ? '<button data-geri>Geri al</button>' : ''}<i class="t-sure" style="animation-duration:${sure}ms"></i></div>`);
@@ -672,7 +673,7 @@ export function kisiKartiHtml(id) {
     ]),
     grup('SEÇİM', [
       satir('Referans', adYaz(f.referans), S), satir('Referans 2', adYaz(f.referans2)),
-      satir('İlzam no', f.ilzam_no ? '<b>' + esc(f.ilzam_no) + '</b>' : '<b style="color:var(--red)">İlzam belgesi yok</b>'), satir('İlzam', adYaz(f.ilzam)), satir('Yetki', f.yetki ? 'Var' : 'Yok'),
+      satir('İlzam no', f.ilzam_no ? '<b>' + esc(f.ilzam_no) + '</b>' : KOMITE.ilzamListesi ? '<b style="color:var(--red)">İlzam belgesi yok</b>' : tire), satir('İlzam', adYaz(f.ilzam)), satir('Yetki', f.yetki ? 'Var' : 'Yok'),
       satir('Zayi', f.zayi ? 'Var' : 'Yok', f.zayi ? W : ''), satir('Sicil notu', esc(f.sicil_notu || tire), f.sicil_notu ? W : ''),
     ]),
     grup('FİRMA', [
@@ -780,14 +781,15 @@ async function kartTikla(ev) {
 
 // ---------------------------------------------------------------- Cmd+K HIZLI ARAMA (masadaki en sık iş: gelen kişiyi bul, işaretle)
 let paletSecim = 0, paletSonuc = [];
-// İlzam belgesi numarası: her yerde aynı rozet (numara yoksa "İLZAM BELGESİ YOK")
+// İlzam belgesi numarası: her yerde aynı rozet (numara yoksa "İLZAM BELGESİ YOK").
+// Numaralı ilzam listesi olmayan seçimde (26-27, js/komite.js ilzamListesi) numarasız kartta rozet hiç çizilmez.
 export function ilzamRozet(f, boyut = '') {
-  return f?.ilzam_no ? `<span class="ilzam-no ${boyut}" title="İlzam belgesi dosya numarası">İLZAM <b>${esc(f.ilzam_no)}</b></span>`
-    : `<span class="ilzam-yok ${boyut}" title="Bu firmanın ilzam belgesi yok">İLZAM BELGESİ YOK</span>`;
+  if (f?.ilzam_no) return `<span class="ilzam-no ${boyut}" title="İlzam belgesi dosya numarası">İLZAM <b>${esc(f.ilzam_no)}</b></span>`;
+  return KOMITE.ilzamListesi ? `<span class="ilzam-yok ${boyut}" title="Bu firmanın ilzam belgesi yok">İLZAM BELGESİ YOK</span>` : '';
 }
 function paletAra(q) {
   const qq = String(q || '').trim();
-  if (/^\d{1,3}$/.test(qq)) return firmaListesi().filter(f => String(f.ilzam_no ?? '') === qq).slice(0, 7);   // 1-3 hane = ilzam no
+  if (KOMITE.ilzamListesi && /^\d{1,3}$/.test(qq)) return firmaListesi().filter(f => String(f.ilzam_no ?? '') === qq).slice(0, 7);   // 1-3 hane = ilzam no
   const t = trArama(q); if (t.length < 2) return [];
   const kelimeler = t.split(' ');
   const skorlu = [];
@@ -804,7 +806,7 @@ function paletAra(q) {
 export function paletAc(baslangic = '') {
   paletKapat();
   if (acikKisi != null) cekmeceKapat();   // tasarım: palet açılınca kişi kartı kapanır
-  const p = el(`<div class="palet" role="dialog" aria-label="Hızlı arama"><div class="pl-ust"><span class="pl-ikon">⌕</span><input class="pl-girdi" placeholder="İsim, firma ya da ilzam no yaz…" value="${esc(baslangic)}" autocomplete="off" spellcheck="false" aria-label="Kişi ara"><span class="pl-esc">ESC</span></div><div class="palet-liste"></div><div class="pl-ayak"><span>↑↓ seç</span><span>↵ oy kullandı</span><span>⇧↵ kartı aç</span><span class="sag">Her işaret 5 sn içinde geri alınabilir</span></div></div>`);
+  const p = el(`<div class="palet" role="dialog" aria-label="Hızlı arama"><div class="pl-ust"><span class="pl-ikon">⌕</span><input class="pl-girdi" placeholder="${KOMITE.ilzamListesi ? 'İsim, firma ya da ilzam no yaz…' : 'İsim ya da firma yaz…'}" value="${esc(baslangic)}" autocomplete="off" spellcheck="false" aria-label="Kişi ara"><span class="pl-esc">ESC</span></div><div class="palet-liste"></div><div class="pl-ayak"><span>↑↓ seç</span><span>↵ oy kullandı</span><span>⇧↵ kartı aç</span><span class="sag">Her işaret 5 sn içinde geri alınabilir</span></div></div>`);
   const arka = el('<div class="cekmece-arka" data-palet-arka style="z-index:105"></div>');
   arka.onclick = paletKapat;
   $('#katman').append(arka, p);

@@ -1,0 +1,26 @@
+{
+  "id": "./?k=2627",
+  "name": "26-27 Çimento, Kireç, Beton · Seçim Masası",
+  "short_name": "26-27 Seçim",
+  "description": "İZTO 26-27 Çimento, Kireç, Beton ve Diğer Mineral Ürünler Sanayi seçim günü masası: kişiler, araçlar, saha ve canlı rapor.",
+  "lang": "tr",
+  "dir": "ltr",
+  "start_url": "./?k=2627",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#087F8C",
+  "theme_color": "#087F8C",
+  "categories": ["productivity", "business"],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "img/ikon-2627-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "img/ikon-2627-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "img/ikon-2627-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "img/ikon-2627-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Saha", "short_name": "Saha", "description": "Sahadaki kişiler ve araç", "url": "./?k=2627#saha", "icons": [{ "src": "img/ikon-2627-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Canlı rapor", "short_name": "Rapor", "description": "Anlık sayılar ve gidişat", "url": "./?k=2627#rapor", "icons": [{ "src": "img/ikon-2627-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ]
+}

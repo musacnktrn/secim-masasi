@@ -9,10 +9,11 @@ import {
   karsiladim, referansBenMi, isaretleyebilirMi, oyBekliyor,
 } from '../core.js';
 import { toast, hataGoster, onayla, isaretle, kisiKartiAc } from '../ui.js';
+import { anahtar, logoHtml } from '../komite.js';
 
 // ---------------------------------------------------------------- sabitler
 const ETA_ARALIK = 45000;   // kalan süre en çok 45 sn'de bir yenilenir
-const TERCIH = 'sorumlu-sekme';
+const TERCIH = anahtar('sorumlu-sekme');
 const BANA = 'bana';
 const siralayici = new Intl.Collator('tr', { sensitivity: 'base' });
 const SORUN_ACIK = 'Sorun işaretlendi (araç sorumlusu)';
@@ -153,7 +154,7 @@ function ustHtml(araclar, bana) {
   const n = araclar.length;
   return `
     <div class="sorumlu-marka">
-      <div class="sorumlu-logo">72. KOMİTE <i>|</i> GENÇ ENERJİ</div>
+      <div class="sorumlu-logo">${logoHtml('i')}</div>
       <div class="sorumlu-canli ${store.cevrimici ? (store.canli ? 'ok' : 'bag') : 'yok'}"><i></i>${!store.cevrimici ? `Çevrimdışı${store.kuyruk.length ? ` · ${store.kuyruk.length} sırada` : ''}` : store.canli ? 'Canlı' : 'Bağlanıyor…'}</div>
       <button type="button" class="sorumlu-cikis" data-cikis aria-label="Çıkış">${IKON.cikis}</button>
     </div>
@@ -466,7 +467,7 @@ body.sorumlu-acik .atlas-dugme{display:none!important}
 
 .sorumlu-alt{flex:none;display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 12px;background:var(--surface);border-top:1px solid var(--line)}
 .sorumlu-alt:empty{display:none}
-.sorumlu-atlas{height:50px;border-radius:12px;border:0;background:#C8102E;color:#fff;font-size:15px;font-weight:800;cursor:pointer;touch-action:manipulation}
+.sorumlu-atlas{height:50px;border-radius:12px;border:0;background:var(--marka);color:#fff;font-size:15px;font-weight:800;cursor:pointer;touch-action:manipulation}
 .sorumlu-atlas.tek{grid-column:span 2}
 .sorumlu-ara{height:50px;border-radius:12px;border:1.5px solid var(--line-2);color:var(--ink);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;text-decoration:none;touch-action:manipulation}
 .sorumlu.bos .sorumlu-alt{display:grid}

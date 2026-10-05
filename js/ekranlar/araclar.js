@@ -10,9 +10,10 @@ import {
 import {
   el, bas, rozetSinif, rozetDurum, toast, hataGoster, cekmeceAc, cekmeceKapat, modal, modalKapat, onayla, isaretle, kisiKartiAc,
 } from '../ui.js';
+import { KOMITE, anahtar, komiteLinki } from '../komite.js';
 
 // ---------------------------------------------------------------- ekran durumu
-const GORUNUM_ANAHTAR = 'secim-araclar-gorunum';
+const GORUNUM_ANAHTAR = anahtar('secim-araclar-gorunum');
 const GORUNUMLER = ['kart', 'tablo', 'gorev'];
 let kok = null;
 let gorunum = 'kart';
@@ -1290,14 +1291,14 @@ function cekmeceBagla(c, id) {
 
 // ---------------------------------------------------------------- şoför / sorumlu girişi (Admin)
 function girisAdresi() {
-  const u = store.ayarlar.site?.url; if (u) return String(u);
+  const u = store.ayarlar.site?.url; if (u) return komiteLinki(String(u));   // link bu seçimi açsın (?k=...), giriş merkezine düşmesin
   if (/^(localhost|127\.|0\.0\.0\.0|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname)) return '';
-  return location.origin + location.pathname;
+  return komiteLinki(location.origin + location.pathname);
 }
 function pinGoster(a, adSoyad, pin, { yeni = true, rol = 'sofor' } = {}) {
   const adres = girisAdresi(); const rolAd = rol === 'sorumlu' ? 'araç sorumlusu' : 'şoför'; const rolKime = rol === 'sorumlu' ? 'araç sorumlusuna' : 'şoföre';
   const metin = [
-    `Merhaba ${trBaslik(adSoyad)}, 72. Komite seçim günü ${rolAd} girişin ${yeni ? 'hazır' : 'yenilendi'}.`,
+    `Merhaba ${trBaslik(adSoyad)}, ${KOMITE.kisaAd} seçim günü ${rolAd} girişin ${yeni ? 'hazır' : 'yenilendi'}.`,
     `Araç: ${fmt.plaka(a.plaka)}`,
     adres ? `Giriş: ${adres}` : null,
     `Ad soyad: ${adSoyad}`,

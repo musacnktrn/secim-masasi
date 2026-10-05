@@ -1,11 +1,16 @@
-// 72. Komite · Seçim Masası · VERİ ÇEKİRDEĞİ (ATLAS, 2026-09-30)
+// Seçim Masası · VERİ ÇEKİRDEĞİ (ATLAS, 2026-09-30 · 2026-10-05 iki seçim: js/komite.js)
 // Tek doğruluk kaynağı Supabase; istemci her şeyi `store`a yükler, canlı değişiklikleri realtime ile alır,
 // yazma işlemleri iyimser (anında ekrana yansır), bağlantı yoksa sıraya girer ve bağlantı gelince gönderilir.
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { KOMITE, KOMITE_SORUN, anahtar } from './komite.js';
 
-export const SUPA_URL = 'https://xpxaerxrnzxtrvcchvzj.supabase.co';
-export const SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhweGFlcnhybnp4dHJ2Y2NodnpqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3MjEyNjEsImV4cCI6MjEwNjI5NzI2MX0.U9KtlFEYOQ55saDUlwYF2yKssjB-VYrKiH2jaB4_HyY';
-export const sb = createClient(SUPA_URL, SUPA_ANON, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'secim-masasi-oturum' } });
+// Supabase adresi, anahtarı, oturum anahtarı ve kanal adı seçime göre (js/komite.js). 72'de 1 Ekim'dekiyle aynı.
+// Veritabanı ayarı hazır değilse (26-27 kurulumu sürerken) istemci hiçbir yere ulaşmayan bir adresle kurulur;
+// app.js bu durumda oturum açmaya ve canlı bağlantıya hiç girişmez, giriş ekranı "kurulum sürüyor" der.
+export const SUPA_URL = KOMITE.supaUrl;
+export const SUPA_ANON = KOMITE.supaAnon;
+export const kurulumBekliyor = !!KOMITE_SORUN;
+export const sb = createClient(kurulumBekliyor ? 'https://kurulum-bekliyor.invalid' : SUPA_URL, kurulumBekliyor ? 'kurulum-bekliyor' : SUPA_ANON, { auth: { persistSession: true, autoRefreshToken: !kurulumBekliyor, storageKey: anahtar('secim-masasi-oturum') } });
 
 // ---------------------------------------------------------------- sabitler
 export const DURUMLAR = [
@@ -130,7 +135,7 @@ export const firmaAdi = f => trBaslik(f?.yetkili || f?.unvan || '');
 export const aracOf = f => f?.arac_id ? store.araclar.get(f.arac_id) : null;
 export function aramaEslesir(f, q) {
   if (!q) return true;
-  const qq = String(q).trim(); if (/^\d{1,3}$/.test(qq)) return String(f.ilzam_no ?? '') === qq;   // 1-3 hane = ilzam belgesi no (Musa 2026-10-01)
+  const qq = String(q).trim(); if (KOMITE.ilzamListesi && /^\d{1,3}$/.test(qq)) return String(f.ilzam_no ?? '') === qq;   // 1-3 hane = ilzam belgesi no (Musa 2026-10-01); ilzam listesi olmayan seçimde normal arama
   const t = trArama(q);
   const alanlar = [f.unvan, f.yetkili, f.yetkili2, f.referans, f.referans2, f.ilce, f.adres, f.cep, f.cep2, f.sabit_tel, f.ticari_sicil, f.oda_sicil, f.notlar];
   const hay = trArama(alanlar.join(' ')); const rakam = t.replace(/\D/g, '');
@@ -227,7 +232,7 @@ async function tazele() {
 let kanal = null;
 export function canliBaglan() {
   if (kanal) return;
-  kanal = sb.channel('secim-masasi')
+  kanal = sb.channel(KOMITE.kanal)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'firmalar' }, p => {
       if (p.eventType === 'DELETE') store.firmalar.delete(p.old.id); else store.firmalar.set(p.new.id, p.new);
       bus.emit('firma', { id: p.new?.id ?? p.old?.id });
@@ -275,7 +280,7 @@ export function canliBaglan() {
 }
 
 // ---------------------------------------------------------------- yazma: sıra (çevrimdışı dayanıklılık)
-const KUYRUK_ANAHTAR = 'secim-masasi-kuyruk';
+const KUYRUK_ANAHTAR = anahtar('secim-masasi-kuyruk');
 try { store.kuyruk = JSON.parse(localStorage.getItem(KUYRUK_ANAHTAR) || '[]'); } catch { store.kuyruk = []; }
 const kuyrukKaydet = () => { try { localStorage.setItem(KUYRUK_ANAHTAR, JSON.stringify(store.kuyruk)); } catch {} };
 async function uygula(is) {

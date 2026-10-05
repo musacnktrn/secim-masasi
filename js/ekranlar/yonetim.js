@@ -8,6 +8,7 @@ import {
   ayarYaz, yonetim, profilleriYenile, istekKarar, durumYap, sinifYap, aracAta, sorumluAta, aracSorumluAta, firmaAlanYaz, yoneticiMi,
 } from '../core.js';
 import { bas, toast, hataGoster, modal, modalKapat, onayla, kisiKartiAc } from '../ui.js';
+import { KOMITE, komiteLinki, logoHtml } from '../komite.js';
 
 // ================================================================ sabitler
 const SEKMELER = [
@@ -66,7 +67,7 @@ const bekleyenSay = () => istekListesi().filter(i => i.durum === 'onay_bekliyor'
 const bolumEl = () => kok?.querySelector('.yon-bolum');
 const zamanMs = t => (t ? new Date(t).getTime() : 0);
 const kararli = v => JSON.stringify(v ?? null, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map(a => [a, x[a]])) : x));
-const uygulamaAdresi = () => location.origin + location.pathname;
+const uygulamaAdresi = () => komiteLinki(location.origin + location.pathname);   // ?k=... ile: link bu seçimi açar
 const waPaylas = metin => fmt.waLink('', metin) || `https://wa.me/?text=${encodeURIComponent(metin)}`;
 const bizListe = f => f.oy_sinifi === 'bizde' || f.oy_sinifi === 'yolda';
 function goreliUzun(ts) {
@@ -112,7 +113,7 @@ function girisMetni(ad, pin, rol, yeniMi) {
   const ilk = trBaslik(String(ad || '').split(' ')[0]);
   const aciklama = ROL_ACIKLAMA[rol] ? ` (${ROL_ACIKLAMA[rol].charAt(0).toLocaleLowerCase('tr')}${ROL_ACIKLAMA[rol].slice(1)})` : '';
   return [
-    yeniMi ? `Merhaba ${ilk}, 72. Komite Seçim Masası hesabın hazır.` : `Merhaba ${ilk}, Seçim Masası PIN'in yenilendi. Eski PIN artık çalışmaz.`,
+    yeniMi ? `Merhaba ${ilk}, ${KOMITE.kisaAd} Seçim Masası hesabın hazır.` : `Merhaba ${ilk}, Seçim Masası PIN'in yenilendi. Eski PIN artık çalışmaz.`,
     '',
     `Adres: ${uygulamaAdresi()}`,
     `Ad soyad: ${ad}`,
@@ -794,7 +795,7 @@ function ayarCiz() {
     </div>
     <div class="yon-hata" data-ayar-hata></div>
     <div class="yon-kaydet-satir" data-kaydet-satir="ayar">${kaydetSatirIc('ayar')}</div>
-    <div class="yon-ipucu">Prova için adresin sonuna <code>?saat=10:30</code> eklenirse (ör. <code>${esc(uygulamaAdresi())}?saat=10:30#masa</code>) uygulama o saatten işler.</div>`;
+    <div class="yon-ipucu">Prova için adresin sonuna <code>?saat=10:30</code> eklenirse (ör. <code>${esc(uygulamaAdresi())}${uygulamaAdresi().includes('?') ? '&amp;' : '?'}saat=10:30#masa</code>) uygulama o saatten işler.</div>`;
 }
 function ayarDogrula(a) {
   if (!(dakika(a.bas) < dakika(a.bit))) return 'Bitiş saati başlangıçtan sonra olmalı';
@@ -1089,12 +1090,12 @@ function pdfRapor() {
   const gecmis = store.olaylar.filter(o => o.tur === 'durum').slice().reverse();
   const td = (...c) => `<tr>${c.map(x => `<td>${esc(x ?? '')}</td>`).join('')}</tr>`;
   const html = `<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>Seçim raporu ${esc(tarihDosya())}</title><style>
-    body{font:12px/1.45 Inter,system-ui,sans-serif;color:#1a1a1a;margin:24px}h1{font-size:20px;margin:0 0 2px}h1 span{color:#C8102E}h2{font-size:14px;margin:22px 0 6px;padding-bottom:4px;border-bottom:2px solid #C8102E}
+    body{font:12px/1.45 Inter,system-ui,sans-serif;color:#1a1a1a;margin:24px}h1{font-size:20px;margin:0 0 2px}h1 span{color:${KOMITE.renk}}h2{font-size:14px;margin:22px 0 6px;padding-bottom:4px;border-bottom:2px solid ${KOMITE.renk}}
     .alt{color:#666;margin-bottom:12px}.ozet{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.ozet div{border:1px solid #ddd;border-radius:8px;padding:8px 10px}.ozet b{display:block;font-size:22px}
     table{width:100%;border-collapse:collapse;margin-top:4px}th,td{text-align:left;padding:4px 6px;border-bottom:1px solid #e5e5e5;font-size:11px}th{background:#f4f4f5;font-size:10px;letter-spacing:.05em}
     .bar{display:flex;align-items:center;gap:8px;margin:2px 0}.bar i{display:block;height:10px;background:#15803D;border-radius:5px}.bar span{width:44px}
     @media print{body{margin:12mm}h2{break-after:avoid}tr{break-inside:avoid}}</style></head><body>
-    <h1>72. KOMİTE <span>|</span> GENÇ ENERJİ · Seçim raporu</h1><div class="alt">${esc(store.ayarlar.secim?.yer || '')} · hazırlandı ${esc(new Date().toLocaleString('tr-TR'))}</div>
+    <h1>${logoHtml('span')} · Seçim raporu</h1><div class="alt">${esc(store.ayarlar.secim?.yer || '')} · hazırlandı ${esc(new Date().toLocaleString('tr-TR'))}</div>
     <div class="ozet"><div><b>${fmt.sayi(s.oy_bizde)}</b>bizim listeden oy kullanan</div><div><b>${fmt.sayi(hedef)}</b>hedef</div><div><b>${fmt.sayi(s.kalan)}</b>kalan</div><div><b>${fmt.sayi(s.oy_kullandi)}</b>toplam oy kullandı</div><div><b>${fmt.sayi(s.kendi_geldi)}</b>kendi gelen</div></div>
     <h2>Referans tablosu</h2><table><thead><tr><th>Referans</th><th>Listedeki</th><th>Oy kullanan</th><th>Oran</th></tr></thead><tbody>${refler.map(x => td(trBaslik(x.r), x.n, x.oy, `%${fmt.yuzde(x.oy, x.n)}`)).join('')}</tbody></table>
     <h2>Saatlik geliş</h2>${Object.keys(saatler).length ? Object.entries(saatler).sort((a, b) => a[0] - b[0]).map(([h, n]) => `<div class="bar"><span>${String(h).padStart(2, '0')}:00</span><i style="width:${Math.round((n / enCok) * 320)}px"></i><b>${n}</b></div>`).join('') : '<div class="alt">Henüz oy kullanan yok.</div>'}
